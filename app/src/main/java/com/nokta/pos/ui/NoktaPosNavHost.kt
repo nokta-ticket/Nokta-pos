@@ -145,8 +145,10 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             )
         }
 
-        composable(Routes.CARDAPIO, arguments = listOf(tabIdArg)) { entry ->
-            val tabId = entry.arguments!!.getLong("tabId")
+        // O tabId da rota chega ao CardapioViewModel pelo SavedStateHandle —
+        // é ele que decide entre "lançar na comanda" e "montar carrinho de
+        // balcão" (rota NOVA_VENDA, que não tem tabId).
+        composable(Routes.CARDAPIO, arguments = listOf(tabIdArg)) {
             CardapioScreen(
                 title = "Adicionar itens",
                 confirmLabel = "Enviar pedido",
