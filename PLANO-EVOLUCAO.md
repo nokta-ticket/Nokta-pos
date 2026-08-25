@@ -144,7 +144,7 @@ App instalado e aberto sem crash; splash foi direto à Home (terminal já paread
 ### Pendências conscientes
 
 1. **Fluxo de venda ponta a ponta não foi executado com dados reais** — exige senha do operador e um cardápio principal definido na organização de teste. O caminho falha hoje com a mensagem correta ("Nenhum cardápio principal definido para esta unidade") em vez de quebrar.
-2. **`requireOpenCashSessionForPayments` continua `true` por padrão** — se o caixa não estiver aberto, todo pagamento é recusado pelo backend. O app já recebe essa flag no login, mas ainda não avisa antes da cobrança. É a próxima fricção provável em campo.
+2. ~~`requireOpenCashSessionForPayments`~~ — **resolvido** (`1d26709`): a recusa por caixa fechado agora vira uma mensagem que diz o que fazer (é ação de gerente no painel, o garçom não abre caixa pelo POS). A flag continua `true` por padrão no backend, como era.
 3. **PIX é registro manual** — o operador confirma no app do banco. Não há integração de liquidação.
 4. **Testes rodam só com Gradle home sem acento** (ver `gradle.properties`).
 5. **Scanner de QR permanece no código**, sem tela apontando para ele — removido da navegação, não apagado.
