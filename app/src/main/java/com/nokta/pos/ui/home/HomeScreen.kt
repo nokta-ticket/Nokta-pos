@@ -293,10 +293,10 @@ private fun StatusRow(state: HomeUiState) {
         ConnectionState.SYNCING -> "Enviando dados…"
         ConnectionState.PENDING -> "$pending ${if (pending == 1) "operação" else "operações"} na fila"
         // Sem fila, o operador ainda precisa saber que está sem rede — a
-        // mensagem não pode soar neutra só porque não há venda presa.
-        ConnectionState.OFFLINE -> state.lastSyncAt
-            ?.let { "Sem conexão — sincronizado ${relativeSince(it)}" }
-            ?: "Sem conexão"
+        // mensagem foca só nisso, sem misturar com "última sincronização"
+        // (as duas ideias juntas soam contraditórias: "sem conexão —
+        // sincronizado agora").
+        ConnectionState.OFFLINE -> "Sem sincronização"
         // Com fila, o risco real é desligar o terminal com venda presa nele.
         ConnectionState.OFFLINE_PENDING ->
             "$pending ${if (pending == 1) "venda não enviada" else "vendas não enviadas"}"
