@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nokta POS</string>
+    <string name="cielo_payment_channel_name">Pagamento em andamento</string>
+    <string name="cielo_payment_in_progress_title">Aguardando pagamento na maquininha…</string>
+</resources>

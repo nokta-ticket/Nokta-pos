@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Obrigatório a partir do Android 11 (API 30+) para o app enxergar o
+         pacote da Cielo Smart e disparar o deep link de pagamento — sem
+         isso, o Intent falha silenciosamente em dispositivos recentes.
+         Ver manual oficial: "Configurando o AndroidManifest". -->
+    <queries>
+        <package android:name="com.ads.lio.uriappclient" />
+    </queries>
+
+    <application
+        android:name=".NoktaPosApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.NoktaPos"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.NoktaPos">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Contrato de retorno do pagamento Cielo (deep link de callback:
+             order://response). A Cielo Smart devolve o resultado do
+             pagamento chamando esta URI — nunca inventar outro esquema, é
+             o mesmo declarado no `urlCallback` enviado no request de
+             pagamento (ver CieloDeepLinkPaymentProvider). -->
+        <activity
+            android:name=".payment.cielo.CieloPaymentResponseActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.NoktaPos.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:host="response" android:scheme="order" />
+            </intent-filter>
+        </activity>
+
+        <!-- Exigido pela Cielo Smart: enquanto o app parceiro aguarda o
+             retorno do deep link de pagamento, precisa manter um serviço em
+             primeiro plano — evita o processo ser encerrado pelo Android
+             enquanto o app da Cielo está em primeiro plano cobrando o
+             cliente. Ver manual: "Serviço em primeiro plano". -->
+        <service
+            android:name=".payment.cielo.CieloPaymentForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+    </application>
+</manifest>

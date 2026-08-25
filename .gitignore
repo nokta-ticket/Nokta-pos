@@ -1,0 +1,15 @@
+# Build
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+app/build/
+
+# Gradle home local usado para contornar o acento no caminho do usuário
+/.gradle-home/
