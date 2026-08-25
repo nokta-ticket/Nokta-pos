@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ferramentas de desenvolvimento. Este manifesto é mesclado APENAS em builds
+  de debug — nada aqui existe no APK de produção.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+          Renderiza a Home com dados fixos para conferência visual.
+          `exported` para poder ser aberta via `adb shell am start`;
+          sem intent-filter LAUNCHER, então não aparece na gaveta de apps.
+        -->
+        <activity
+            android:name="com.nokta.pos.devtools.HomePreviewActivity"
+            android:exported="true"
+            android:theme="@style/Theme.NoktaPos" />
+    </application>
+
+</manifest>

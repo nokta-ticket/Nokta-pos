@@ -2,6 +2,7 @@ package com.nokta.pos.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nokta.pos.common.Money
 import com.nokta.pos.ui.theme.AlertRed
+import com.nokta.pos.ui.theme.AlertRedLight
 import com.nokta.pos.ui.theme.MoneyGreen
 import com.nokta.pos.ui.theme.MoneyGreenLight
 import com.nokta.pos.ui.theme.WarningAmber
@@ -46,9 +48,12 @@ fun PosPrimaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().heightIn(min = 60.dp),
+        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp),
         enabled = enabled && !loading,
         shape = MaterialTheme.shapes.medium,
+        // Sem elevação: o botão primário já se distingue pela cor de marca;
+        // sombra colorida por baixo é o que dá aparência de template.
+        elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp, 0.dp, 0.dp),
     ) {
         if (loading) {
             CircularProgressIndicator(
@@ -85,78 +90,6 @@ fun PosSecondaryButton(
             Spacer(Modifier.width(10.dp))
         }
         Text(text, style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-/**
- * Cartão de ação da Home. Grande de propósito: é o primeiro toque de toda
- * operação e precisa ser acertado sem olhar com atenção.
- */
-@Composable
-fun PosActionCard(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    emphasized: Boolean = false,
-) {
-    val container = when {
-        !enabled -> MaterialTheme.colorScheme.surfaceVariant
-        emphasized -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.surface
-    }
-    val content = when {
-        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-        emphasized -> MaterialTheme.colorScheme.onPrimary
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
-    Card(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = if (emphasized) 116.dp else 92.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (emphasized) 3.dp else 0.dp),
-        border = if (emphasized || !enabled) null else BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(if (emphasized) 56.dp else 46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        if (emphasized) Color.White.copy(alpha = 0.18f)
-                        else MaterialTheme.colorScheme.primaryContainer,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(if (emphasized) 30.dp else 24.dp),
-                    tint = if (emphasized) Color.White else MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = if (emphasized) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = content.copy(alpha = 0.75f),
-                )
-            }
-        }
     }
 }
 
@@ -294,19 +227,29 @@ fun PosLoading(modifier: Modifier = Modifier, label: String? = null) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(strokeWidth = 3.dp)
+        // Traço fino e na cor de marca — carregar é momento de espera, não de
+        // alarde; um indicador grosso e cinza parece do sistema, não do produto.
+        CircularProgressIndicator(
+            modifier = Modifier.size(26.dp),
+            strokeWidth = 2.5.dp,
+            color = MaterialTheme.colorScheme.primary,
+        )
         if (label != null) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-/** Aviso persistente no topo do conteúdo (ex.: caixa fechado, sem conexão). */
+/**
+ * Aviso persistente no topo do conteúdo (ex.: caixa fechado, sem conexão).
+ * Fundo bem lavado + borda da própria cor: informa sem virar um bloco chapado
+ * disputando atenção com a ação principal.
+ */
 @Composable
 fun PosInlineWarning(text: String, modifier: Modifier = Modifier, tone: PosBadgeTone = PosBadgeTone.WARNING) {
     val (bg, fg) = when (tone) {
-        PosBadgeTone.DANGER -> MaterialTheme.colorScheme.errorContainer to AlertRed
+        PosBadgeTone.DANGER -> AlertRedLight to AlertRed
         else -> WarningAmberLight to WarningAmber
     }
     Row(
@@ -314,7 +257,8 @@ fun PosInlineWarning(text: String, modifier: Modifier = Modifier, tone: PosBadge
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .background(bg)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .border(1.dp, fg.copy(alpha = 0.18f), MaterialTheme.shapes.small)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, style = MaterialTheme.typography.bodyMedium, color = fg)
