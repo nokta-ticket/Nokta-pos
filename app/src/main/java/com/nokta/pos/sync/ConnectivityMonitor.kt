@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -49,7 +48,22 @@ class ConnectivityMonitor @Inject constructor(
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    /** Emite a cada mudança real de conectividade. */
+    /**
+     * Emite a cada mudança real de conectividade.
+     *
+     * Usa `registerDefaultNetworkCallback` (não `registerNetworkCallback` com
+     * um `NetworkRequest` manual filtrando só por `NET_CAPABILITY_INTERNET`)
+     * de propósito: esse filtro manual comprovadamente NÃO dispara `onLost`
+     * de forma confiável quando a rede padrão cai e o sistema passa por uma
+     * rede transitória sem capabilities de internet no meio do caminho
+     * (reproduzido no emulador: Wi-Fi cai, o sistema reatribui a rede padrão
+     * para uma `NetworkAgentInfo` provisória sem `INTERNET`/`VALIDATED`, e
+     * como essa rede nunca chega a casar o filtro, nem `onAvailable` nem
+     * `onLost` chegam ao callback — o indicador da Home fica preso no último
+     * valor). `registerDefaultNetworkCallback` acompanha a rede padrão do
+     * sistema diretamente, sem esse filtro, e sempre chama `onLost` quando
+     * ela deixa de existir.
+     */
     fun observe(): Flow<Boolean> = callbackFlow {
         val cm = manager
         if (cm == null) {
@@ -62,16 +76,13 @@ class ConnectivityMonitor @Inject constructor(
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { trySend(isOnline()) }
-            override fun onLost(network: Network) { trySend(isOnline()) }
+            override fun onLost(network: Network) { trySend(false) }
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                 trySend(isOnline())
             }
         }
 
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        cm.registerNetworkCallback(request, callback)
+        cm.registerDefaultNetworkCallback(callback)
 
         awaitClose { runCatching { cm.unregisterNetworkCallback(callback) } }
     }.distinctUntilChanged()
