@@ -2,6 +2,7 @@ package com.nokta.pos.sync
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.nokta.pos.comanda.data.OperationRepository
@@ -39,10 +40,22 @@ class OutboxRepository @Inject constructor(
     private val operationRepository: OperationRepository,
 ) {
     private val queueKey = stringPreferencesKey("pending_operations")
+    private val lastSyncKey = longPreferencesKey("last_sync_at")
     private val json = Json { ignoreUnknownKeys = true }
 
     val pendingCount: Flow<Int> = context.outboxDataStore.data.map { prefs ->
         prefs[queueKey]?.let { runCatching { decode(it).size }.getOrDefault(0) } ?: 0
+    }
+
+    /**
+     * Quando a fila esvaziou pela última vez. Alimenta o "sincronizado há X"
+     * da Home — offline sem essa informação não diz ao operador se ele pode
+     * fechar o turno ou se tem venda de uma hora atrás presa no aparelho.
+     */
+    val lastSyncAt: Flow<Long?> = context.outboxDataStore.data.map { it[lastSyncKey] }
+
+    private suspend fun markSynced() {
+        context.outboxDataStore.edit { it[lastSyncKey] = System.currentTimeMillis() }
     }
 
     suspend fun enqueue(operation: OutboxOperation) {
@@ -84,6 +97,9 @@ class OutboxRepository @Inject constructor(
                 is SyncOutcome.Retry -> return results // rede caiu — tenta tudo de novo depois
             }
         }
+        // Chegou aqui: nada ficou pendente por falha de rede. Marca o momento
+        // em que o terminal esteve comprovadamente em dia com o servidor.
+        markSynced()
         return results
     }
 

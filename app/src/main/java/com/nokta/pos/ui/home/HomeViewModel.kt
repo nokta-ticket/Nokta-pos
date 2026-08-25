@@ -6,6 +6,7 @@ import com.nokta.pos.access.OperatorAccess
 import com.nokta.pos.auth.AuthRepository
 import com.nokta.pos.payment.cielo.CieloDeepLinkPaymentProvider
 import com.nokta.pos.payment.cielo.PendingCieloAttempt
+import com.nokta.pos.sync.ConnectivityMonitor
 import com.nokta.pos.sync.OutboxRepository
 import com.nokta.pos.sync.SyncOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +28,29 @@ enum class OperationMode {
     }
 }
 
+/**
+ * Situação do terminal em relação ao servidor. São estados distintos de
+ * propósito: "sem internet" e "tenho venda por enviar" pedem reações
+ * diferentes do operador, e juntá-los num único "offline" esconderia
+ * justamente o caso perigoso — ficar sem rede COM venda na fila.
+ */
+enum class ConnectionState {
+    /** Com rede e nada por enviar. */
+    ONLINE,
+
+    /** Enviando a fila agora. */
+    SYNCING,
+
+    /** Com rede, mas ainda há operação por enviar (falha anterior). */
+    PENDING,
+
+    /** Sem rede e nada na fila — pode operar, tudo que fez já subiu. */
+    OFFLINE,
+
+    /** Sem rede E com venda na fila: não desligue o terminal. */
+    OFFLINE_PENDING,
+}
+
 data class HomeUiState(
     val operatorName: String? = null,
     val operatorRole: String? = null,
@@ -37,9 +61,21 @@ data class HomeUiState(
     val pendingSyncCount: Int = 0,
     val isSyncing: Boolean = false,
     val syncMessage: String? = null,
+    val isOnline: Boolean = true,
+    /** Instante da última vez que a fila ficou vazia (epoch ms). */
+    val lastSyncAt: Long? = null,
 ) {
     /** Mesas primeiro em serviço de mesa; balcão continua disponível em todo modo. */
     val highlightTables: Boolean get() = operationMode != OperationMode.COUNTER_SERVICE
+
+    val connection: ConnectionState
+        get() = when {
+            isSyncing -> ConnectionState.SYNCING
+            !isOnline && pendingSyncCount > 0 -> ConnectionState.OFFLINE_PENDING
+            !isOnline -> ConnectionState.OFFLINE
+            pendingSyncCount > 0 -> ConnectionState.PENDING
+            else -> ConnectionState.ONLINE
+        }
 }
 
 @HiltViewModel
@@ -47,6 +83,7 @@ class HomeViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val cieloProvider: CieloDeepLinkPaymentProvider,
     private val outboxRepository: OutboxRepository,
+    private val connectivityMonitor: ConnectivityMonitor,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -56,6 +93,7 @@ class HomeViewModel @Inject constructor(
             locationName = authRepository.locationName(),
             access = authRepository.currentAccess(),
             operationMode = OperationMode.parse(authRepository.operationMode()),
+            isOnline = connectivityMonitor.isOnline(),
         ),
     )
     val state: StateFlow<HomeUiState> = _state
@@ -75,6 +113,22 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             outboxRepository.pendingCount.collect { count ->
                 _state.value = _state.value.copy(pendingSyncCount = count)
+            }
+        }
+
+        viewModelScope.launch {
+            outboxRepository.lastSyncAt.collect { at ->
+                _state.value = _state.value.copy(lastSyncAt = at)
+            }
+        }
+
+        // A rede voltando é o gatilho natural para esvaziar a fila: o operador
+        // não deveria precisar abrir a Home de novo para isso acontecer.
+        viewModelScope.launch {
+            connectivityMonitor.observe().collect { online ->
+                val wasOffline = !_state.value.isOnline
+                _state.value = _state.value.copy(isOnline = online)
+                if (online && wasOffline) syncPending()
             }
         }
 

@@ -45,6 +45,23 @@ fun HomePreviewContent(variant: String? = null) {
                 ),
             ),
         )
+        // Sem rede, nada na fila: pode operar, tudo que fez já subiu.
+        "offline" -> HomeUiState(
+            operatorName = "Vitor",
+            locationName = "Nokta Bar · Unidade Barra da Tijuca",
+            access = OperatorAccess.PERMISSIVE,
+            isOnline = false,
+            lastSyncAt = System.currentTimeMillis() - 2 * 60_000,
+        )
+        // Sem rede COM venda na fila: o caso perigoso.
+        "offline_pending" -> HomeUiState(
+            operatorName = "Vitor",
+            locationName = "Nokta Bar · Unidade Barra da Tijuca",
+            access = OperatorAccess.PERMISSIVE,
+            isOnline = false,
+            pendingSyncCount = 2,
+            lastSyncAt = System.currentTimeMillis() - 47 * 60_000,
+        )
         // Nome longo + unidade longa: confere truncamento do cabeçalho.
         "long" -> HomeUiState(
             operatorName = "Maria Fernanda",

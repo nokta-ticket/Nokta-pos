@@ -127,7 +127,7 @@ fun HomeContent(
 
             Spacer(Modifier.height(20.dp))
 
-            StatusRow(pendingCount = state.pendingSyncCount, isSyncing = state.isSyncing)
+            StatusRow(state = state)
 
             if (!access.canTakePayments) {
                 Spacer(Modifier.height(16.dp))
@@ -190,13 +190,11 @@ private fun Header(
     unitName: String?,
     onLogout: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "Olá, $userName",
+                modifier = Modifier.weight(1f),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp,
@@ -204,38 +202,42 @@ private fun Header(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            unitName?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(4.dp))
-                // Reticências: sem isso o nome de unidade longo é cortado no
-                // meio da palavra e parece defeito, não texto abreviado.
-                Text(
-                    text = it,
-                    fontSize = 14.sp,
-                    color = NoktaMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+
+            Column(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NoktaSurface)
+                    .border(1.dp, NoktaBorderStrong, RoundedCornerShape(14.dp))
+                    .clickable(onClick = onLogout),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.Logout,
+                    contentDescription = "Sair",
+                    tint = NoktaInkSoft,
+                    modifier = Modifier.size(19.dp),
                 )
+                Spacer(Modifier.height(2.dp))
+                Text("Sair", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
             }
         }
 
-        Column(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(NoktaSurface)
-                .border(1.dp, NoktaBorderStrong, RoundedCornerShape(14.dp))
-                .clickable(onClick = onLogout),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Outlined.Logout,
-                contentDescription = "Sair",
-                tint = NoktaInkSoft,
-                modifier = Modifier.size(19.dp),
+        // A unidade ocupa uma linha própria, com a largura inteira: ao lado do
+        // botão "Sair" ela perdia ~72dp e um nome comum de rede ("Nokta Bar ·
+        // Unidade Barra da Tijuca") era abreviado sem necessidade. Sobra
+        // espaço vertical de sobra nesta tela; largura é que era escassa.
+        unitName?.takeIf { it.isNotBlank() }?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = it,
+                fontSize = 14.sp,
+                lineHeight = 19.sp,
+                color = NoktaMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(2.dp))
-            Text("Sair", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
         }
     }
 }
@@ -253,18 +255,50 @@ private fun Header(
  * pendência, verde e silencioso.
  */
 @Composable
-private fun StatusRow(pendingCount: Int, isSyncing: Boolean) {
-    val hasPending = pendingCount > 0
-    val dotColor = when {
-        isSyncing -> NoktaAccentBlue
-        hasPending -> WarningAmber
-        else -> NoktaOnline
+private fun StatusRow(state: HomeUiState) {
+    val connection = state.connection
+
+    val dotColor = when (connection) {
+        ConnectionState.ONLINE -> NoktaOnline
+        ConnectionState.SYNCING -> NoktaAccentBlue
+        ConnectionState.PENDING -> WarningAmber
+        ConnectionState.OFFLINE -> NoktaMutedSoft
+        ConnectionState.OFFLINE_PENDING -> AlertRed
     }
-    val statusLabel = if (hasPending || isSyncing) "Pendente" else "Online"
-    val syncLabel = when {
-        isSyncing -> "Sincronizando…"
-        hasPending -> "$pendingCount ${if (pendingCount == 1) "operação" else "operações"} na fila"
-        else -> "Tudo sincronizado"
+
+    val statusLabel = when (connection) {
+        ConnectionState.ONLINE -> "Online"
+        ConnectionState.SYNCING -> "Sincronizando"
+        ConnectionState.PENDING -> "Pendente"
+        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> "Offline"
+    }
+
+    val pending = state.pendingSyncCount
+    val detail = when (connection) {
+        ConnectionState.ONLINE -> "Sincronizado agora"
+        ConnectionState.SYNCING -> "Enviando dados…"
+        ConnectionState.PENDING -> "$pending ${if (pending == 1) "operação" else "operações"} na fila"
+        // Sem fila, a informação útil é "o que fiz já subiu, e quando".
+        ConnectionState.OFFLINE -> state.lastSyncAt
+            ?.let { "Última sync: ${relativeSince(it)}" }
+            ?: "Sem conexão"
+        // Com fila, o risco real é desligar o terminal com venda presa nele.
+        ConnectionState.OFFLINE_PENDING ->
+            "$pending ${if (pending == 1) "venda não enviada" else "vendas não enviadas"}"
+    }
+
+    // Só os estados que exigem atenção puxam cor no texto auxiliar; os demais
+    // ficam cinza para não competir com a ação principal.
+    val detailColor = when (connection) {
+        ConnectionState.PENDING -> WarningAmber
+        ConnectionState.OFFLINE_PENDING -> AlertRed
+        else -> NoktaMutedSoft
+    }
+
+    val detailIcon = when (connection) {
+        ConnectionState.ONLINE -> Icons.Outlined.CheckCircle
+        ConnectionState.SYNCING -> Icons.Outlined.Sync
+        else -> Icons.Outlined.CloudOff
     }
 
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -284,21 +318,34 @@ private fun StatusRow(pendingCount: Int, isSyncing: Boolean) {
         Spacer(Modifier.weight(1f))
 
         Text(
-            text = syncLabel,
+            text = detail,
             fontSize = 12.sp,
-            color = if (hasPending && !isSyncing) WarningAmber else NoktaMutedSoft,
+            color = detailColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.width(6.dp))
         Icon(
-            imageVector = when {
-                isSyncing -> Icons.Outlined.Sync
-                hasPending -> Icons.Outlined.CloudOff
-                else -> Icons.Outlined.CheckCircle
-            },
+            imageVector = detailIcon,
             contentDescription = null,
-            tint = if (hasPending && !isSyncing) WarningAmber else NoktaMutedSoft,
+            tint = detailColor,
             modifier = Modifier.size(15.dp),
         )
+    }
+}
+
+/**
+ * "há 2 min", "há 1 h", "ontem". Precisão fina não ajuda o operador — o que
+ * ele decide com isso é se pode fechar o turno, então a ordem de grandeza
+ * basta.
+ */
+private fun relativeSince(epochMs: Long): String {
+    val minutes = ((System.currentTimeMillis() - epochMs) / 60_000).coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "agora"
+        minutes < 60 -> "há $minutes min"
+        minutes < 60 * 24 -> "há ${minutes / 60} h"
+        else -> "há ${minutes / (60 * 24)} d"
     }
 }
 
