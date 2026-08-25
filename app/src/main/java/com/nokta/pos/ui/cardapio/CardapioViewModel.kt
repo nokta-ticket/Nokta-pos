@@ -11,11 +11,7 @@ import com.nokta.pos.cardapio.domain.ModifierGroup
 import com.nokta.pos.cart.Cart
 import com.nokta.pos.cart.CartLine
 import com.nokta.pos.cart.CartLineModifier
-import com.nokta.pos.comanda.data.OperationRepository
-import com.nokta.pos.sync.OutboxOperation
-import com.nokta.pos.sync.OutboxOrderLine
-import com.nokta.pos.sync.OutboxOrderLineModifier
-import com.nokta.pos.sync.OutboxRepository
+import com.nokta.pos.comanda.data.TabRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -109,19 +105,26 @@ private fun String.normalizeForSearch(): String =
 class CardapioViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val menuRepository: MenuRepository,
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
-    private val outboxRepository: OutboxRepository,
 ) : ViewModel() {
 
-    /** -1 = venda de balcão (ainda não existe comanda). */
-    val tabId: Long? = savedStateHandle.get<Long>("tabId")?.takeIf { it > 0 }
+    /** Ausente = venda de balcão (ainda não existe comanda). */
+    val tabId: String? = savedStateHandle.get<String>("tabId")
 
     private val _state = MutableStateFlow(CardapioUiState())
     val state: StateFlow<CardapioUiState> = _state
 
     init { loadMenu() }
 
+    /**
+     * Offline-first: a tela observa o Room continuamente (nunca "carrega uma
+     * vez e para") — qualquer escrita feita por `ensureMenuSynced` (aqui ou
+     * na Home, que já pré-carrega) aparece na hora, sem esta tela precisar
+     * saber que uma sincronização aconteceu. `forceRefresh` não pula o Room:
+     * só decide se tentamos a rede de novo mesmo com um cardápio já recente
+     * (o próprio [MenuRepository] decide se vale reescrever).
+     */
     fun loadMenu(forceRefresh: Boolean = false) {
         val organizationId = authRepository.currentOrganizationId() ?: return
         // Resolvido no login (backend informa qual cardápio é o principal da
@@ -135,17 +138,26 @@ class CardapioViewModel @Inject constructor(
             return
         }
 
-        _state.value = _state.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
-            runCatching { menuRepository.getMenu(organizationId, menuId, forceRefresh) }
-                .onSuccess { menu ->
-                    _state.value = _state.value.copy(menu = menu, isLoading = false, isOffline = false)
-                }
+            menuRepository.observeMenu(menuId).collect { menu ->
+                _state.value = _state.value.copy(
+                    menu = menu,
+                    isLoading = menu == null,
+                    error = null,
+                )
+            }
+        }
+
+        viewModelScope.launch {
+            runCatching { menuRepository.ensureMenuSynced(organizationId, menuId, forceRefresh) }
                 .onFailure { e ->
-                    _state.value = _state.value.copy(
-                        isLoading = false,
-                        error = e.message ?: "Erro ao carregar cardápio.",
-                    )
+                    // Só é erro de verdade se ainda não há nada no Room para mostrar —
+                    // com dado local, a tela segue offline e o erro seria ruído.
+                    if (_state.value.menu == null) {
+                        _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Erro ao carregar cardápio.")
+                    } else {
+                        _state.value = _state.value.copy(isOffline = true)
+                    }
                 }
         }
     }
@@ -250,8 +262,11 @@ class CardapioViewModel @Inject constructor(
      * a venda de balcão fecha o próprio fluxo (BalcaoViewModel), porque lá o
      * pedido e o pagamento acontecem na mesma ação.
      *
-     * `clientRequestId` é gerado UMA vez por tentativa e reaproveitado em
-     * retry: um duplo toque ou uma rede instável nunca duplica o pedido.
+     * Offline-first: [TabRepository.submitOrder] já grava os itens no Room
+     * IMEDIATAMENTE e só então tenta a rede — nunca lança por falta de
+     * conexão, então esta função não precisa mais decidir "enfileirar ou
+     * não": isso é responsabilidade do repository. O garçom nunca fica
+     * parado no meio do salão esperando sinal para lançar uma cerveja.
      */
     fun submitOrder(onDone: () -> Unit) {
         val organizationId = authRepository.currentOrganizationId() ?: return
@@ -260,63 +275,24 @@ class CardapioViewModel @Inject constructor(
         if (cart.isEmpty) return
 
         _state.value = _state.value.copy(isSubmittingOrder = true, submitError = null)
-        val clientRequestId = pendingClientRequestId ?: UUID.randomUUID().toString().also { pendingClientRequestId = it }
 
         viewModelScope.launch {
             runCatching {
-                operationRepository.submitOrder(organizationId, targetTabId, cart.lines.map { it.toOrderLine() }, clientRequestId)
+                tabRepository.submitOrder(organizationId, targetTabId, cart.lines.map { it.toOrderLine() })
             }
                 .onSuccess {
-                    pendingClientRequestId = null
                     _state.value = _state.value.copy(isSubmittingOrder = false, cart = Cart())
                     onDone()
                 }
                 .onFailure { e ->
-                    if (e is IOException) {
-                        // Sem rede: o pedido vai para a fila com o MESMO
-                        // clientRequestId e sobe quando a conexão voltar. O
-                        // garçom não pode ficar parado no meio do salão
-                        // esperando sinal para lançar uma cerveja.
-                        outboxRepository.enqueue(
-                            OutboxOperation.SubmitOrder(
-                                id = UUID.randomUUID().toString(),
-                                organizationId = organizationId,
-                                createdAtEpochMs = System.currentTimeMillis(),
-                                tabId = targetTabId,
-                                clientRequestId = clientRequestId,
-                                lines = cart.lines.map { line ->
-                                    val orderLine = line.toOrderLine()
-                                    OutboxOrderLine(
-                                        menuItemId = orderLine.menuItemId,
-                                        variantId = orderLine.variantId,
-                                        quantity = orderLine.quantity,
-                                        notes = orderLine.notes,
-                                        modifiers = orderLine.modifiers.map {
-                                            OutboxOrderLineModifier(it.modifierGroupId, it.modifierOptionId, it.quantity)
-                                        },
-                                    )
-                                },
-                            ),
-                        )
-                        pendingClientRequestId = null
-                        _state.value = _state.value.copy(
-                            isSubmittingOrder = false,
-                            cart = Cart(),
-                            submitError = "Sem conexão — o pedido foi salvo e será enviado assim que a rede voltar.",
-                        )
-                        onDone()
-                    } else {
-                        // Erro de negócio (comanda fechada, item indisponível):
-                        // enfileirar não resolveria. Mantém o clientRequestId
-                        // para um retry manual não duplicar.
-                        _state.value = _state.value.copy(
-                            isSubmittingOrder = false,
-                            submitError = e.message ?: "Não foi possível enviar o pedido.",
-                        )
-                    }
+                    // Só chega aqui em erro de NEGÓCIO (comanda fechada, item
+                    // indisponível) — falta de rede já foi absorvida pelo
+                    // repository, que enfileirou e devolveu sucesso.
+                    _state.value = _state.value.copy(
+                        isSubmittingOrder = false,
+                        submitError = e.message ?: "Não foi possível enviar o pedido.",
+                    )
                 }
         }
     }
-
-    private var pendingClientRequestId: String? = null
 }

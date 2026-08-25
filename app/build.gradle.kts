@@ -104,9 +104,21 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
-    // Persistência local (cache de cardápio, tentativa de pagamento pendente, sessão)
+    // Persistência local — sessão/credenciais/pareamento (chave-valor simples,
+    // continua em DataStore) e o banco operacional (Room), fonte de verdade
+    // da UI para cardápio/mesas/comandas/fila de sincronização offline-first.
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+
+    // Sincronização em background — sobrevive a fechamento do app e a reboot,
+    // respeita conectividade nativamente (NetworkType.CONNECTED) e já traz
+    // backoff/retry sem reinventar um scheduler próprio.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.hilt:hilt-work:1.2.0")
+    ksp("androidx.hilt:hilt-compiler:1.2.0")
 
     // Imagens do cardápio. Cache em disco próprio do Coil: o garçom reconhece
     // o produto pela foto muito mais rápido que pelo nome, e sem cache a lista
@@ -123,6 +135,13 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("app.cash.turbine:turbine:1.1.0")
+    // Room real (não fake) rodando na JVM via Robolectric — valida o schema,
+    // as constraints (@@unique de idempotência) e as queries de verdade, sem
+    // precisar de emulador/dispositivo físico para a suíte rodar no CI.
+    testImplementation("androidx.room:room-testing:2.6.1")
+    testImplementation("androidx.work:work-testing:2.9.1")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

@@ -30,7 +30,7 @@ import androidx.activity.result.contract.ActivityResultContracts
  */
 @Composable
 fun ScannerScreen(
-    onTabResolved: (Long) -> Unit,
+    onTabResolved: (String) -> Unit,
     onCancel: () -> Unit,
     viewModel: ScannerViewModel = hiltViewModel(),
 ) {

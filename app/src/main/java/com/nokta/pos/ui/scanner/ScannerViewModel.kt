@@ -3,7 +3,7 @@ package com.nokta.pos.ui.scanner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +18,7 @@ data class ScannerUiState(
 
 @HiltViewModel
 class ScannerViewModel @Inject constructor(
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
 ) : ViewModel() {
 
@@ -32,7 +32,7 @@ class ScannerViewModel @Inject constructor(
     }
 
     /** Chamado tanto pela leitura de câmera (código decodificado) quanto pelo botão de entrada manual. */
-    fun resolveTab(code: String, onResolved: (Long) -> Unit) {
+    fun resolveTab(code: String, onResolved: (String) -> Unit) {
         if (isResolving || code.isBlank()) return
         isResolving = true
         _state.value = _state.value.copy(isLoading = true, error = null)
@@ -46,10 +46,10 @@ class ScannerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            runCatching { operationRepository.getTabByPublicCode(organizationId, locationId, code) }
+            runCatching { tabRepository.getTabByPublicCode(organizationId, locationId, code) }
                 .onSuccess { tab ->
                     _state.value = _state.value.copy(isLoading = false)
-                    onResolved(tab.id)
+                    onResolved(tab.localId)
                 }
                 .onFailure { e ->
                     _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Comanda não encontrada.")

@@ -64,7 +64,7 @@ fun HomeScreen(
     onMesas: () -> Unit,
     onComandas: () -> Unit,
     onHistorico: () -> Unit,
-    onOpenTab: (Long) -> Unit,
+    onOpenTab: (String) -> Unit,
     onLogout: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
@@ -73,7 +73,7 @@ fun HomeScreen(
     state.pendingPaymentAttempt?.let { attempt ->
         PendingPaymentDialog(
             attempt = attempt,
-            onOpenTab = { onOpenTab(attempt.tabId) },
+            onOpenTab = { viewModel.resolvePendingAttemptTabLocalId(attempt.tabId, onOpenTab) },
             onDismiss = viewModel::dismissPendingAttempt,
         )
         return

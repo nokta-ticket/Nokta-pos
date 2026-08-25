@@ -4,7 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.common.Money
 import com.nokta.pos.payment.domain.PartialValidation
@@ -99,32 +99,46 @@ data class PendingRegistration(
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
     private val paymentProvider: PaymentProvider,
 ) : ViewModel() {
 
-    val tabId: Long = savedStateHandle.get<Long>("tabId") ?: error("tabId ausente")
+    val tabLocalId: String = savedStateHandle.get<String>("tabId") ?: error("tabId ausente")
 
     private val _state = MutableStateFlow(CheckoutUiState())
     val state: StateFlow<CheckoutUiState> = _state
 
-    init { refresh() }
+    init {
+        observeTab()
+        refresh()
+    }
 
-    fun refresh() {
-        val organizationId = authRepository.currentOrganizationId() ?: return
-        _state.value = _state.value.copy(isLoading = true, error = null)
+    private fun observeTab() {
         viewModelScope.launch {
-            runCatching { operationRepository.getTab(organizationId, tabId) }
-                .onSuccess { tab ->
+            tabRepository.observeTab(tabLocalId).collect { tab ->
+                if (tab != null) {
                     _state.value = _state.value.copy(
                         tab = tab,
                         isLoading = false,
                         customAmountCents = if (_state.value.customAmountCents == 0L) tab.remaining.cents else _state.value.customAmountCents,
                     )
                 }
+            }
+        }
+    }
+
+    /** Puxão explícito contra o servidor — a tela já é alimentada pelo Room via [observeTab]. */
+    fun refresh() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        viewModelScope.launch {
+            runCatching { tabRepository.getTab(organizationId, tabLocalId) }
                 .onFailure { e ->
-                    _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Erro ao carregar comanda.")
+                    if (_state.value.tab == null) {
+                        _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Erro ao carregar comanda.")
+                    } else {
+                        _state.value = _state.value.copy(isLoading = false)
+                    }
                 }
         }
     }
@@ -250,9 +264,9 @@ class CheckoutViewModel @Inject constructor(
         attemptId: String,
     ) {
         runCatching {
-            operationRepository.registerPayment(
+            tabRepository.registerPayment(
                 organizationId = organizationId,
-                tabId = tab.id,
+                tabLocalId = tabLocalId,
                 method = method,
                 amount = amount,
                 idempotencyKey = attemptId,
@@ -305,7 +319,7 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private suspend fun closeTab(organizationId: Long, tab: Tab) {
-        runCatching { operationRepository.closeTab(organizationId, tab.id) }
+        runCatching { tabRepository.closeTab(organizationId, tabLocalId) }
             .onSuccess { _state.value = _state.value.copy(tab = it, tabClosed = true) }
         // Falha ao fechar não é erro do pagamento: o dinheiro está registrado
         // e a comanda pode ser encerrada depois, na tela da comanda.

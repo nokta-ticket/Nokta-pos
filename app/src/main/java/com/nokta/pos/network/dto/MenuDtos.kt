@@ -42,6 +42,12 @@ data class MenuCategoryResponse(
 data class MenuBody(
     val nome: String,
     val descricao: String? = null,
+    /**
+     * Instante da última mudança relevante (categoria ou produto) — o app
+     * compara com o que já tem salvo antes de rebaixar o cardápio inteiro.
+     * Nulo em cardápio recém-criado sem nada ainda.
+     */
+    val updatedAt: String? = null,
     val categories: List<MenuCategoryResponse> = emptyList(),
 )
 

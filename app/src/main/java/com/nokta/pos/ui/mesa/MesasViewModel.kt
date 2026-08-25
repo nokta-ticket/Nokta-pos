@@ -3,7 +3,7 @@ package com.nokta.pos.ui.mesa
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.TabType
 import com.nokta.pos.comanda.domain.VenueTable
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,28 +49,35 @@ private fun String.normalize(): String =
  */
 @HiltViewModel
 class MesasViewModel @Inject constructor(
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MesasUiState())
     val state: StateFlow<MesasUiState> = _state
 
-    init { load() }
+    init {
+        observeTables()
+        load()
+    }
 
+    /** A tela observa o Room continuamente — mostra o último dado conhecido com aviso de idade se offline. */
+    private fun observeTables() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val locationId = authRepository.currentLocationId() ?: return
+        viewModelScope.launch {
+            tabRepository.observeTables(organizationId, locationId).collect { tables ->
+                _state.value = _state.value.copy(tables = tables, isLoading = false)
+            }
+        }
+    }
+
+    /** Puxão explícito contra o servidor — falha em silêncio na tela: o Room já mostra o último snapshot conhecido. */
     fun load() {
         val organizationId = authRepository.currentOrganizationId() ?: return
         val locationId = authRepository.currentLocationId() ?: return
-        _state.value = _state.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
-            runCatching { operationRepository.listTables(organizationId, locationId) }
-                .onSuccess { _state.value = _state.value.copy(tables = it, isLoading = false) }
-                .onFailure { e ->
-                    _state.value = _state.value.copy(
-                        isLoading = false,
-                        error = e.message ?: "Não foi possível carregar as mesas.",
-                    )
-                }
+            tabRepository.refreshTables(organizationId, locationId)
         }
     }
 
@@ -85,25 +92,30 @@ class MesasViewModel @Inject constructor(
      * garante que duas maquininhas tocando a mesma mesa ao mesmo tempo nunca
      * criam duas comandas: a segunda falha e relemos o estado real.
      */
-    fun openTable(table: VenueTable, onOpened: (Long) -> Unit) {
-        table.openTabId?.let { onOpened(it); return }
-
+    fun openTable(table: VenueTable, onOpened: (String) -> Unit) {
         val organizationId = authRepository.currentOrganizationId() ?: return
         val locationId = authRepository.currentLocationId() ?: return
+
+        table.openTabId?.let { serverId ->
+            viewModelScope.launch { onOpened(tabRepository.localIdForServerId(organizationId, locationId, serverId)) }
+            return
+        }
+
         if (_state.value.openingTableId != null) return
 
         _state.value = _state.value.copy(openingTableId = table.id, error = null)
         viewModelScope.launch {
             runCatching {
-                operationRepository.openTab(
+                tabRepository.openTab(
                     organizationId = organizationId,
                     locationId = locationId,
                     type = TabType.TABLE,
                     tableId = table.id,
+                    tableName = table.name,
                 )
             }.onSuccess { tab ->
                 _state.value = _state.value.copy(openingTableId = null)
-                onOpened(tab.id)
+                onOpened(tab.localId)
             }.onFailure { e ->
                 // Corrida com outro terminal: relê para pegar a comanda que o
                 // outro acabou de abrir, em vez de insistir em criar.

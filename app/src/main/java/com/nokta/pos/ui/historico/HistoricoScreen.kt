@@ -35,7 +35,7 @@ import com.nokta.pos.ui.theme.*
  */
 @Composable
 fun HistoricoScreen(
-    onOpenTab: (Long) -> Unit,
+    onOpenTab: (String) -> Unit,
     onBack: () -> Unit,
     viewModel: HistoricoViewModel = hiltViewModel(),
 ) {
@@ -76,8 +76,8 @@ fun HistoricoScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(state.tabs, key = { it.id }) { tab ->
-                        HistoricoRow(tab = tab, onClick = { onOpenTab(tab.id) })
+                    items(state.tabs, key = { it.localId }) { tab ->
+                        HistoricoRow(tab = tab, onClick = { onOpenTab(tab.localId) })
                     }
                 }
             }

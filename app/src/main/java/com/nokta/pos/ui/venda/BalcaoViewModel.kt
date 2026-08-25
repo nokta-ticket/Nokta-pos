@@ -1,10 +1,11 @@
 package com.nokta.pos.ui.venda
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
 import com.nokta.pos.cart.Cart
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabType
 import com.nokta.pos.common.Money
@@ -72,7 +73,8 @@ data class BalcaoUiState(
  */
 @HiltViewModel
 class BalcaoViewModel @Inject constructor(
-    private val operationRepository: OperationRepository,
+    private val savedStateHandle: SavedStateHandle,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
     private val paymentProvider: PaymentProvider,
 ) : ViewModel() {
@@ -80,12 +82,26 @@ class BalcaoViewModel @Inject constructor(
     private val _state = MutableStateFlow(BalcaoUiState())
     val state: StateFlow<BalcaoUiState> = _state
 
-    /** Mesma chave em toda tentativa desta venda — impede pagamento duplicado no retry. */
-    private var paymentIdempotencyKey: String = UUID.randomUUID().toString()
-    private var orderClientRequestId: String = UUID.randomUUID().toString()
+    /**
+     * Mesma chave em toda tentativa desta venda — impede pagamento duplicado
+     * no retry. Guardadas em [SavedStateHandle] (sobrevive à recriação do
+     * processo pelo Android, não só rotação de tela) — sem isso, um processo
+     * morto no meio de "cartão aprovado, registro pendente" perderia o
+     * rastro de que já existe uma cobrança feita, arriscando um retry que
+     * abriria uma segunda comanda para o mesmo dinheiro já capturado.
+     */
+    private var paymentIdempotencyKey: String
+        get() = savedStateHandle.get<String>(KEY_PAYMENT_IDEMPOTENCY) ?: UUID.randomUUID().toString().also { savedStateHandle[KEY_PAYMENT_IDEMPOTENCY] = it }
+        set(value) { savedStateHandle[KEY_PAYMENT_IDEMPOTENCY] = value }
+
+    private var orderClientRequestId: String
+        get() = savedStateHandle.get<String>(KEY_ORDER_CLIENT_REQUEST) ?: UUID.randomUUID().toString().also { savedStateHandle[KEY_ORDER_CLIENT_REQUEST] = it }
+        set(value) { savedStateHandle[KEY_ORDER_CLIENT_REQUEST] = value }
 
     /** Comanda já aberta numa tentativa anterior que falhou depois — reaproveitada, nunca duplicada. */
-    private var openedTabId: Long? = null
+    private var openedTabLocalId: String?
+        get() = savedStateHandle.get<String>(KEY_OPENED_TAB_LOCAL_ID)
+        set(value) { savedStateHandle[KEY_OPENED_TAB_LOCAL_ID] = value }
 
     /**
      * Cobrança já aprovada na adquirente aguardando registro. Guardada para
@@ -205,12 +221,14 @@ class BalcaoViewModel @Inject constructor(
 
         _state.value = _state.value.copy(statusMessage = "Aguardando o cartão…")
 
+        // tabId 0: no balcão a comanda ainda nem existe quando cobramos (ou,
+        // se já existe de uma tentativa anterior, ainda não tem confirmação
+        // do servidor). O provider usa isto só para rastrear a tentativa
+        // localmente; a Cielo não conhece o conceito de comanda.
+        val knownTabId = openedTabLocalId?.let { tabRepository.getCachedTab(it)?.id }
         val result = paymentProvider.startPayment(
             PaymentRequest(
-                // tabId 0: no balcão a comanda ainda nem existe quando
-                // cobramos. O provider usa isto só para rastrear a tentativa
-                // localmente; a Cielo não conhece o conceito de comanda.
-                tabId = openedTabId ?: 0L,
+                tabId = knownTabId ?: 0L,
                 amount = current.total,
                 method = method,
                 installments = if (method == PosPaymentMethod.CREDIT_CARD) current.installments else 0,
@@ -282,22 +300,22 @@ class BalcaoViewModel @Inject constructor(
         _state.value = _state.value.copy(statusMessage = "Registrando a venda…")
 
         runCatching {
-            val tabId = openedTabId ?: operationRepository.openTab(
+            val tabLocalId = openedTabLocalId ?: tabRepository.openTab(
                 organizationId = organizationId,
                 locationId = locationId,
                 type = TabType.COUNTER,
-            ).id.also { openedTabId = it }
+            ).localId.also { openedTabLocalId = it }
 
-            operationRepository.submitOrder(
+            tabRepository.submitOrder(
                 organizationId = organizationId,
-                tabId = tabId,
+                tabLocalId = tabLocalId,
                 lines = _state.value.cart.lines.map { it.toOrderLine() },
-                clientRequestId = orderClientRequestId,
+                orderLocalId = orderClientRequestId,
             )
 
-            val paidTab = operationRepository.registerPayment(
+            val paidTab = tabRepository.registerPayment(
                 organizationId = organizationId,
-                tabId = tabId,
+                tabLocalId = tabLocalId,
                 method = method,
                 amount = amount,
                 idempotencyKey = paymentIdempotencyKey,
@@ -307,8 +325,12 @@ class BalcaoViewModel @Inject constructor(
 
             // Fechar é o passo final. Com a trava de itens pendentes desligada
             // (default), uma bebida entregue na hora não impede o fechamento.
+            // Só é possível com a comanda já sincronizada — se ainda está
+            // offline, o fechamento fica para quando o SyncEngine confirmar
+            // (a venda em si já está garantida: item lançado e pagamento
+            // registrado, ambos no Room desde já).
             if (paidTab.isFullyPaid) {
-                runCatching { operationRepository.closeTab(organizationId, tabId) }
+                runCatching { tabRepository.closeTab(organizationId, tabLocalId) }
             }
             paidTab
         }.onSuccess { tab ->
@@ -354,8 +376,12 @@ class BalcaoViewModel @Inject constructor(
         if (_state.value.awaitingRegistrationRetry) return
         paymentIdempotencyKey = UUID.randomUUID().toString()
         orderClientRequestId = UUID.randomUUID().toString()
-        openedTabId = null
+        openedTabLocalId = null
         approvedAwaitingRegistration = null
         _state.value = BalcaoUiState()
     }
 }
+
+private const val KEY_PAYMENT_IDEMPOTENCY = "balcao_payment_idempotency_key"
+private const val KEY_ORDER_CLIENT_REQUEST = "balcao_order_client_request_id"
+private const val KEY_OPENED_TAB_LOCAL_ID = "balcao_opened_tab_local_id"

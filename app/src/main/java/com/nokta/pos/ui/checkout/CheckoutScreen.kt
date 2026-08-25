@@ -30,7 +30,7 @@ import com.nokta.pos.ui.components.*
  */
 @Composable
 fun CheckoutScreen(
-    tabId: Long,
+    tabId: String,
     onTabClosed: () -> Unit,
     onBack: () -> Unit,
     viewModel: CheckoutViewModel = hiltViewModel(),

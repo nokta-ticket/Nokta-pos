@@ -34,7 +34,7 @@ import com.nokta.pos.ui.theme.MoneyGreen
  */
 @Composable
 fun ComandaScreen(
-    tabId: Long,
+    tabId: String,
     onAddProducts: () -> Unit,
     onCheckout: () -> Unit,
     onBack: () -> Unit,

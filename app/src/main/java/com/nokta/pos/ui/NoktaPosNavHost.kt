@@ -38,12 +38,12 @@ object Routes {
     const val CARDAPIO = "cardapio/{tabId}"
     const val CHECKOUT = "checkout/{tabId}"
 
-    fun comanda(tabId: Long) = "comanda/$tabId"
-    fun cardapio(tabId: Long) = "cardapio/$tabId"
-    fun checkout(tabId: Long) = "checkout/$tabId"
+    fun comanda(tabLocalId: String) = "comanda/$tabLocalId"
+    fun cardapio(tabLocalId: String) = "cardapio/$tabLocalId"
+    fun checkout(tabLocalId: String) = "checkout/$tabLocalId"
 }
 
-private val tabIdArg = navArgument("tabId") { type = NavType.LongType }
+private val tabIdArg = navArgument("tabId") { type = NavType.StringType }
 
 /**
  * Navegação do POS.
@@ -146,7 +146,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         }
 
         composable(Routes.COMANDA, arguments = listOf(tabIdArg)) { entry ->
-            val tabId = entry.arguments!!.getLong("tabId")
+            val tabId = entry.arguments!!.getString("tabId")!!
             ComandaScreen(
                 tabId = tabId,
                 onAddProducts = { navController.navigate(Routes.cardapio(tabId)) },
@@ -167,7 +167,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         }
 
         composable(Routes.CHECKOUT, arguments = listOf(tabIdArg)) { entry ->
-            val tabId = entry.arguments!!.getLong("tabId")
+            val tabId = entry.arguments!!.getString("tabId")!!
             CheckoutScreen(
                 tabId = tabId,
                 onTabClosed = { navController.popBackStack(Routes.HOME, inclusive = false) },

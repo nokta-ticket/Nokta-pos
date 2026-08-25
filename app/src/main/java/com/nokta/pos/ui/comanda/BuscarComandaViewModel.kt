@@ -3,7 +3,7 @@ package com.nokta.pos.ui.comanda
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -35,7 +35,7 @@ data class BuscarComandaUiState(
  */
 @HiltViewModel
 class BuscarComandaViewModel @Inject constructor(
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
 ) : ViewModel() {
 
@@ -67,7 +67,7 @@ class BuscarComandaViewModel @Inject constructor(
 
         _state.value = _state.value.copy(isSearching = true, error = null)
         viewModelScope.launch {
-            runCatching { operationRepository.searchOpenTabs(organizationId, locationId, query) }
+            runCatching { tabRepository.searchOpenTabs(organizationId, locationId, query) }
                 .onSuccess { tabs ->
                     _state.value = _state.value.copy(
                         results = tabs,

@@ -4,12 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.access.OperatorAccess
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.cardapio.data.MenuRepository
+import com.nokta.pos.comanda.data.TabRepository
+import com.nokta.pos.data.local.dao.OutboxDao
 import com.nokta.pos.payment.cielo.CieloDeepLinkPaymentProvider
 import com.nokta.pos.payment.cielo.PendingCieloAttempt
 import com.nokta.pos.sync.ConnectivityMonitor
-import com.nokta.pos.sync.OutboxRepository
-import com.nokta.pos.sync.SyncOutcome
+import com.nokta.pos.sync.SyncEngine
+import com.nokta.pos.sync.SyncStatusStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,9 +87,12 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val cieloProvider: CieloDeepLinkPaymentProvider,
-    private val outboxRepository: OutboxRepository,
+    private val outboxDao: OutboxDao,
+    private val syncEngine: SyncEngine,
+    private val syncStatusStore: SyncStatusStore,
     private val connectivityMonitor: ConnectivityMonitor,
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
+    private val menuRepository: MenuRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -115,13 +120,13 @@ class HomeViewModel @Inject constructor(
         // precisa saber que ainda há venda não sincronizada antes de encerrar
         // o turno e desligar a maquininha.
         viewModelScope.launch {
-            outboxRepository.pendingCount.collect { count ->
+            outboxDao.observePendingCount().collect { count ->
                 _state.value = _state.value.copy(pendingSyncCount = count)
             }
         }
 
         viewModelScope.launch {
-            outboxRepository.lastSyncAt.collect { at ->
+            syncStatusStore.lastSyncAt.collect { at ->
                 _state.value = _state.value.copy(lastSyncAt = at)
             }
         }
@@ -138,41 +143,63 @@ class HomeViewModel @Inject constructor(
 
         syncPending()
         loadOpenTabsCount()
+        warmUpMenuCache()
     }
 
     /**
-     * Quantas mesas/comandas seguem abertas. Falha em silêncio (fica `null` e
-     * o atalho some) — é informação de apoio, e uma queda de rede não pode
-     * transformar a Home num amontoado de mensagens de erro.
+     * Pré-carrega o cardápio assim que a Home abre, antes de o operador tocar
+     * em "Nova venda".
+     *
+     * O ajuste 2 do brief era exatamente este: a primeira chamada HTTPS de
+     * cada processo paga o custo de handshake TLS sozinha (o resto do app
+     * reusa a mesma conexão depois) — medido em produção, ~400ms depois de
+     * aquecida, vários segundos na primeira vez. Sem isso, quem pagava esse
+     * custo era o operador parado na frente do cliente na primeira venda do
+     * turno. Agora ele é pago aqui, em silêncio, enquanto a Home ainda está
+     * sendo lida — e `CardapioViewModel` observa o Room continuamente, então
+     * isto não duplica chamada nenhuma quando "Nova venda" for aberta de
+     * verdade: o cardápio já vai estar sincronizado (ou o Room já sabe que
+     * a rede falhou e segue com o que já tinha).
+     */
+    private fun warmUpMenuCache() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val menuId = authRepository.mainMenuId() ?: return
+        viewModelScope.launch {
+            runCatching { menuRepository.ensureMenuSynced(organizationId, menuId) }
+        }
+    }
+
+    /**
+     * Quantas mesas/comandas seguem abertas — observa o Room continuamente
+     * (nunca uma leitura única): reflete tanto o que veio do servidor quanto
+     * comandas abertas offline neste terminal, sem precisar de rede.
      */
     fun loadOpenTabsCount() {
         val organizationId = authRepository.currentOrganizationId() ?: return
         val locationId = authRepository.currentLocationId() ?: return
         viewModelScope.launch {
-            runCatching { operationRepository.searchOpenTabs(organizationId, locationId) }
-                .onSuccess { tabs -> _state.value = _state.value.copy(openTabsCount = tabs.size) }
+            tabRepository.observeOpenTabsCount(organizationId, locationId).collect { count ->
+                _state.value = _state.value.copy(openTabsCount = count)
+            }
         }
     }
 
     /**
      * Sobe o que ficou pendente. Chamado ao abrir a Home e ao voltar para ela
      * — os dois momentos em que o operador está parado e a rede pode ter
-     * voltado. Silencioso quando não há nada na fila.
+     * voltado. Silencioso quando não há nada na fila. Isto é só um atalho
+     * imediato: a sincronização de verdade é automática mesmo sem a Home
+     * aberta (WorkManager + [SyncTriggerCoordinator], ver NoktaPosApplication).
      */
     fun syncPending() {
         viewModelScope.launch {
-            if (outboxRepository.peekAll().isEmpty()) return@launch
             _state.value = _state.value.copy(isSyncing = true)
-            val results = outboxRepository.syncAll()
-            val rejected = results.count { it.second is SyncOutcome.Rejected }
-            val synced = results.count { it.second is SyncOutcome.Success }
+            val result = syncEngine.syncAll()
             _state.value = _state.value.copy(
                 isSyncing = false,
-                syncMessage = when {
-                    rejected > 0 -> "$rejected ${if (rejected == 1) "operação foi recusada" else "operações foram recusadas"} pelo servidor. Confira as comandas."
-                    synced > 0 -> "$synced ${if (synced == 1) "operação enviada" else "operações enviadas"}."
-                    else -> null
-                },
+                syncMessage = if (result.processed > 0) {
+                    "${result.processed} ${if (result.processed == 1) "operação enviada" else "operações enviadas"}."
+                } else null,
             )
         }
     }
@@ -194,7 +221,23 @@ class HomeViewModel @Inject constructor(
                 _state.value = _state.value.copy(access = authRepository.currentAccess())
             }
         }
-        loadOpenTabsCount()
+        // A contagem em si já é observada continuamente (loadOpenTabsCount,
+        // chamado uma vez no init) — aqui só pedimos um refresh contra o
+        // servidor para o Room não ficar defasado enquanto o operador estava
+        // fora da Home.
+        val organizationId = authRepository.currentOrganizationId()
+        val locationId = authRepository.currentLocationId()
+        if (organizationId != null && locationId != null) {
+            viewModelScope.launch { tabRepository.searchOpenTabs(organizationId, locationId) }
+        }
+    }
+
+    /** Resolve o `Tab.id` (Long) de uma tentativa de pagamento pendente para o `localId` que a navegação usa. */
+    fun resolvePendingAttemptTabLocalId(tabId: Long, onResolved: (String) -> Unit) {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        viewModelScope.launch {
+            tabRepository.localIdForTabId(organizationId, tabId)?.let(onResolved)
+        }
     }
 
     fun dismissPendingAttempt() {

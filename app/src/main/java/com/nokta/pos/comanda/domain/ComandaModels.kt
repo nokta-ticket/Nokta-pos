@@ -1,6 +1,22 @@
 package com.nokta.pos.comanda.domain
 
 import com.nokta.pos.common.Money
+import java.util.UUID
+
+/**
+ * Deriva um `Long` sempre negativo e estável a partir do `localId` (UUID) de
+ * uma comanda ainda não confirmada pelo servidor — usado como [Tab.id]
+ * enquanto [Tab.serverId] é nulo, para que rotas Compose/`SavedStateHandle`
+ * continuem trafegando `Long` sem qualquer mudança de tipo. Nenhum id de
+ * servidor é negativo, então não há ambiguidade possível com um `serverId`
+ * real; colisão de hash é astronomicamente improvável para o volume de
+ * comandas abertas por um único terminal entre reinicializações.
+ */
+fun negativeIdFromLocalId(localId: String): Long {
+    val uuid = runCatching { UUID.fromString(localId) }.getOrElse { UUID.nameUUIDFromBytes(localId.toByteArray()) }
+    val magnitude = uuid.mostSignificantBits xor uuid.leastSignificantBits
+    return -(magnitude and Long.MAX_VALUE) - 1L
+}
 
 enum class TabType { TABLE, INDIVIDUAL, COUNTER }
 enum class TabStatus { OPEN, CLOSED, CANCELED }
@@ -56,14 +72,28 @@ enum class PaymentMethod {
 data class TabItemModifier(val name: String, val quantity: Int, val total: Money)
 
 /**
- * Um item consumido, já registrado no servidor. Guarda os SNAPSHOTS de nome e
- * preço que o backend gravou no momento do lançamento — se o produto for
- * renomeado ou tiver o preço alterado depois, a comanda continua mostrando o
- * que foi realmente vendido (item 18: a auditoria nunca é reescrita).
+ * Estado de sincronização de uma entidade offline-first, do ponto de vista da
+ * UI — não confundir com [OrderItemStatus]/[TabStatus] (estado OPERACIONAL,
+ * sempre vindo do servidor). Isto é sobre "o terminal já confirmou isto com a
+ * Nokta?", nunca sobre o andamento do pedido em si.
+ */
+enum class LocalSyncState { SYNCED, PENDING, FAILED }
+
+/**
+ * Um item consumido. Guarda os SNAPSHOTS de nome e preço que o backend gravou
+ * no momento do lançamento — se o produto for renomeado ou tiver o preço
+ * alterado depois, a comanda continua mostrando o que foi realmente vendido
+ * (item 18: a auditoria nunca é reescrita).
+ *
+ * `id` é sempre o identificador ESTÁVEL para a UI usar (key de lista, alvo de
+ * clique): é o `serverId` quando já confirmado, ou o hash do `localId`
+ * (UUID) enquanto pendente — nunca muda de valor no meio da tela. `localId`
+ * é a chave real usada para persistir/atualizar no Room.
  */
 data class TabItem(
-    val id: Long,
-    val orderId: Long,
+    val localId: String,
+    val serverId: Long?,
+    val orderId: Long?,
     val productName: String,
     val variantName: String,
     val quantity: Int,
@@ -74,7 +104,9 @@ data class TabItem(
     val notes: String?,
     val modifiers: List<TabItemModifier> = emptyList(),
     val createdAt: String? = null,
+    val syncState: LocalSyncState = LocalSyncState.SYNCED,
 ) {
+    val id: String get() = localId
     /** Descrição completa da linha, incluindo adicionais e observação. */
     val detailLine: String?
         get() {
@@ -89,7 +121,8 @@ data class TabItem(
 }
 
 data class TabPayment(
-    val id: Long,
+    val localId: String,
+    val serverId: Long?,
     val method: PaymentMethod,
     val amount: Money,
     val received: Money?,
@@ -97,17 +130,31 @@ data class TabPayment(
     val isCanceled: Boolean,
     val externalReference: String?,
     val confirmedAt: String?,
-)
+    val syncState: LocalSyncState = LocalSyncState.SYNCED,
+) {
+    val id: String get() = localId
+}
 
 /**
- * Snapshot de uma comanda tal como o servidor a vê. Totais SEMPRE vêm do
- * backend (subtotalCents/totalCents/remainingCents) — o app nunca recalcula
+ * Snapshot de uma comanda. Totais SEMPRE vêm do backend quando sincronizados
+ * (subtotalCents/totalCents/remainingCents) — o app nunca recalcula
  * localmente para decidir se pode fechar ou quanto cobrar (seção 30 do PRD:
  * duas maquininhas podem editar a mesma comanda ao mesmo tempo, e o servidor
- * é a única fonte de verdade após cada mutação).
+ * é a única fonte de verdade após cada mutação SINCRONIZADA). Enquanto
+ * [syncState] é PENDING, os totais são a melhor estimativa local — calculada
+ * a partir dos itens/pagamentos já registrados neste terminal.
+ *
+ * `id` continua `Long` — não é o `Tab.id` de servidor puro: é `serverId` já
+ * confirmado, ou um **id local negativo** enquanto a comanda foi aberta
+ * offline e ainda não tem confirmação (nenhum id de servidor é negativo, o
+ * que torna a distinção inequívoca em toda a UI/navegação sem precisar trocar
+ * rotas Compose de `Long` para `String`). [localId] (UUID) é a chave real de
+ * persistência/sincronização; a UI nunca precisa conhecê-lo diretamente.
  */
 data class Tab(
-    val id: Long,
+    val localId: String,
+    val serverId: Long?,
+    val negativeLocalId: Long,
     val organizationId: Long,
     val locationId: Long,
     val publicCode: String,
@@ -127,7 +174,10 @@ data class Tab(
     val openedAt: String? = null,
     val items: List<TabItem> = emptyList(),
     val payments: List<TabPayment> = emptyList(),
+    val syncState: LocalSyncState = LocalSyncState.SYNCED,
 ) {
+    val id: Long get() = serverId ?: negativeLocalId
+
     val isOpen get() = status == TabStatus.OPEN
     val isFullyPaid get() = remaining.isZeroOrNegative()
     val hasPartialPayment get() = paid.isPositive() && !isFullyPaid

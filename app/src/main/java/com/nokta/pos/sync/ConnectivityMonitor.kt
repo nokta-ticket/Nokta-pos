@@ -13,6 +13,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * Só a checagem síncrona "tem rede agora?" — extraída como interface para
+ * que quem decide se uma operação vai para o Outbox ([SyncEngine]) não
+ * dependa da classe concreta Android (`ConnectivityManager`), que em testes
+ * de unidade puros é frágil de simular via shadows de baixo nível entre
+ * versões do Robolectric.
+ */
+interface ConnectivityChecker {
+    fun isOnline(): Boolean
+}
+
+/**
  * Diz se o terminal tem internet utilizável.
  *
  * Usa `NET_CAPABILITY_VALIDATED` além de `INTERNET`: no salão é comum a
@@ -28,11 +39,11 @@ import javax.inject.Singleton
 @Singleton
 class ConnectivityMonitor @Inject constructor(
     private val context: Context,
-) {
+) : ConnectivityChecker {
     private val manager: ConnectivityManager?
         get() = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
-    fun isOnline(): Boolean {
+    override fun isOnline(): Boolean {
         val capabilities = manager?.let { it.getNetworkCapabilities(it.activeNetwork) } ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)

@@ -47,9 +47,17 @@ object NetworkModule {
             // request já autenticado para saber se o 401 é de sessão morta.
             .addInterceptor(unauthorizedInterceptor)
             .addInterceptor(logging)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(20, TimeUnit.SECONDS)
+            // Padrão do cliente: curto e agressivo. Numa rede de evento —
+            // viva, mas ruim — o pior cenário não é "sem conexão" (isso falha
+            // rápido), é a conexão ENGASGADA: o socket abre e fica pendurado.
+            // 15s/20s deixava o operador olhando pro spinner por até 20s antes
+            // de qualquer coisa acontecer. Consultas com fallback de cache
+            // (cardápio, mesas, comandas) usam um timeout ainda mais curto —
+            // ver `readThroughTimeout` — porque para elas existe uma resposta
+            // boa pronta no disco esperando a rede desistir.
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
             .build()
     }
 

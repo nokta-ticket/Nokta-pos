@@ -32,7 +32,7 @@ import com.nokta.pos.ui.theme.MoneyGreen
  */
 @Composable
 fun MesasScreen(
-    onOpenTab: (Long) -> Unit,
+    onOpenTab: (String) -> Unit,
     onBack: () -> Unit,
     viewModel: MesasViewModel = hiltViewModel(),
 ) {

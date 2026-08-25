@@ -3,7 +3,7 @@ package com.nokta.pos.ui.historico
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
-import com.nokta.pos.comanda.data.OperationRepository
+import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.common.Money
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,7 +36,7 @@ data class HistoricoUiState(
  */
 @HiltViewModel
 class HistoricoViewModel @Inject constructor(
-    private val operationRepository: OperationRepository,
+    private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
 ) : ViewModel() {
 
@@ -51,7 +51,7 @@ class HistoricoViewModel @Inject constructor(
 
         _state.value = _state.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
-            runCatching { operationRepository.listRecentClosedTabs(organizationId, locationId) }
+            runCatching { tabRepository.listRecentClosedTabs(organizationId, locationId) }
                 .onSuccess { tabs -> _state.value = HistoricoUiState(tabs = tabs, isLoading = false) }
                 .onFailure { e ->
                     _state.value = _state.value.copy(

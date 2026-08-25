@@ -28,7 +28,7 @@ import com.nokta.pos.ui.theme.MoneyGreen
  */
 @Composable
 fun BuscarComandaScreen(
-    onOpenTab: (Long) -> Unit,
+    onOpenTab: (String) -> Unit,
     onBack: () -> Unit,
     viewModel: BuscarComandaViewModel = hiltViewModel(),
 ) {
@@ -74,8 +74,8 @@ fun BuscarComandaScreen(
                     icon = Icons.Filled.Receipt,
                 )
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-                    items(state.results, key = { it.id }) { tab ->
-                        TabSearchRow(tab = tab, onClick = { onOpenTab(tab.id) })
+                    items(state.results, key = { it.localId }) { tab ->
+                        TabSearchRow(tab = tab, onClick = { onOpenTab(tab.localId) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
                     }
                 }

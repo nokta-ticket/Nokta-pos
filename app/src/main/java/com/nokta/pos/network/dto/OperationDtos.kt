@@ -11,6 +11,13 @@ data class CreateTabRequest(
     val customerName: String? = null,
     val customerPhone: String? = null,
     val guestCount: Int? = null,
+    /**
+     * Chave de idempotência offline-first — o `localId` (UUID) gerado no
+     * momento em que a comanda é criada localmente. Retry do mesmo request
+     * (fila de sincronização reenviando após rede caiu no meio) nunca abre
+     * uma segunda comanda: o backend devolve a já criada.
+     */
+    val clientRequestId: String? = null,
 )
 
 @Serializable
