@@ -16,6 +16,7 @@ import com.nokta.pos.ui.checkout.CheckoutScreen
 import com.nokta.pos.ui.comanda.BuscarComandaScreen
 import com.nokta.pos.ui.comanda.ComandaScreen
 import com.nokta.pos.ui.components.PosLoading
+import com.nokta.pos.ui.historico.HistoricoScreen
 import com.nokta.pos.ui.home.HomeScreen
 import com.nokta.pos.ui.login.LoginScreen
 import com.nokta.pos.ui.mesa.MesasScreen
@@ -32,6 +33,7 @@ object Routes {
     const val NOVA_VENDA = "nova-venda"
     const val MESAS = "mesas"
     const val BUSCAR_COMANDA = "buscar-comanda"
+    const val HISTORICO = "historico"
     const val COMANDA = "comanda/{tabId}"
     const val CARDAPIO = "cardapio/{tabId}"
     const val CHECKOUT = "checkout/{tabId}"
@@ -107,6 +109,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
                 onNovaVenda = { navController.navigate(Routes.NOVA_VENDA) },
                 onMesas = { navController.navigate(Routes.MESAS) },
                 onComandas = { navController.navigate(Routes.BUSCAR_COMANDA) },
+                onHistorico = { navController.navigate(Routes.HISTORICO) },
                 onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onLogout = {
                     navController.navigate(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
@@ -130,6 +133,13 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
 
         composable(Routes.BUSCAR_COMANDA) {
             BuscarComandaScreen(
+                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Routes.HISTORICO) {
+            HistoricoScreen(
                 onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onBack = { navController.popBackStack() },
             )

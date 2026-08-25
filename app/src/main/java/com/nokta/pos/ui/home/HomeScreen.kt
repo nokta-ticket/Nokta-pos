@@ -14,7 +14,9 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.TableRestaurant
 import androidx.compose.material3.*
@@ -61,6 +63,7 @@ fun HomeScreen(
     onNovaVenda: () -> Unit,
     onMesas: () -> Unit,
     onComandas: () -> Unit,
+    onHistorico: () -> Unit,
     onOpenTab: (Long) -> Unit,
     onLogout: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
@@ -81,6 +84,7 @@ fun HomeScreen(
         onNovaVenda = onNovaVenda,
         onMesas = onMesas,
         onComandas = onComandas,
+        onHistorico = onHistorico,
         onLogout = { viewModel.logout(); onLogout() },
     )
 }
@@ -98,6 +102,7 @@ fun HomeContent(
     onNovaVenda: () -> Unit,
     onMesas: () -> Unit,
     onComandas: () -> Unit,
+    onHistorico: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val access = state.access
@@ -166,6 +171,15 @@ fun HomeContent(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 // Balcão puro: comanda antes de mesa (mesa quase não é usada).
                 if (state.highlightTables) { tables(); tabs() } else { tabs(); tables() }
+            }
+
+            if (access.canViewTabs) {
+                Spacer(Modifier.height(14.dp))
+                ShortcutsRow(
+                    openTabsCount = state.openTabsCount,
+                    onOpenTabs = onComandas,
+                    onHistory = onHistorico,
+                )
             }
 
             // Empurra a assinatura para o rodapé; com 26dp de folga mínima
@@ -469,6 +483,123 @@ private fun BigActionCard(
             tint = NoktaMutedSoft,
             modifier = Modifier.align(Alignment.End).size(20.dp),
         )
+    }
+}
+
+/* ------------------------ Atalhos inferiores ------------------------ */
+
+/**
+ * Faixa de atalhos secundários: o que segue aberto e o que já foi fechado.
+ *
+ * Fica abaixo das ações principais e em peso visual menor de propósito — é
+ * consulta de apoio, não caminho de venda. A contagem de abertas some
+ * enquanto carrega (ou se a chamada falhar): um número errado sobre quantas
+ * mesas estão em aberto é pior do que número nenhum.
+ */
+@Composable
+private fun ShortcutsRow(
+    openTabsCount: Int?,
+    onOpenTabs: () -> Unit,
+    onHistory: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(NoktaSurface)
+            .border(1.dp, NoktaBorder, RoundedCornerShape(16.dp))
+            .height(72.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onOpenTabs)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.MenuBook,
+                        contentDescription = null,
+                        tint = NoktaInkSoft,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Abertas", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk)
+                    if (openTabsCount != null && openTabsCount > 0) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(21.dp)
+                                .clip(CircleShape)
+                                .background(NoktaPurpleBright),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = openTabsCount.toString(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = when (openTabsCount) {
+                        null -> "Mesas e comandas abertas"
+                        0 -> "Nada em aberto"
+                        else -> "Mesas e comandas abertas"
+                    },
+                    fontSize = 11.5.sp,
+                    color = NoktaMutedSoft,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Box(Modifier.width(1.dp).height(44.dp).background(NoktaBorder))
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onHistory)
+                .padding(start = 16.dp, end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = NoktaInkSoft,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Histórico", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Ver vendas encerradas",
+                    fontSize = 11.5.sp,
+                    color = NoktaMutedSoft,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Icon(
+                ChevronRightThin,
+                contentDescription = null,
+                tint = NoktaMutedSoft,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

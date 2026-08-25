@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.access.OperatorAccess
 import com.nokta.pos.auth.AuthRepository
+import com.nokta.pos.comanda.data.OperationRepository
 import com.nokta.pos.payment.cielo.CieloDeepLinkPaymentProvider
 import com.nokta.pos.payment.cielo.PendingCieloAttempt
 import com.nokta.pos.sync.ConnectivityMonitor
@@ -64,6 +65,8 @@ data class HomeUiState(
     val isOnline: Boolean = true,
     /** Instante da última vez que a fila ficou vazia (epoch ms). */
     val lastSyncAt: Long? = null,
+    /** Mesas e comandas ainda abertas nesta unidade. `null` = ainda carregando. */
+    val openTabsCount: Int? = null,
 ) {
     /** Mesas primeiro em serviço de mesa; balcão continua disponível em todo modo. */
     val highlightTables: Boolean get() = operationMode != OperationMode.COUNTER_SERVICE
@@ -84,6 +87,7 @@ class HomeViewModel @Inject constructor(
     private val cieloProvider: CieloDeepLinkPaymentProvider,
     private val outboxRepository: OutboxRepository,
     private val connectivityMonitor: ConnectivityMonitor,
+    private val operationRepository: OperationRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -133,6 +137,21 @@ class HomeViewModel @Inject constructor(
         }
 
         syncPending()
+        loadOpenTabsCount()
+    }
+
+    /**
+     * Quantas mesas/comandas seguem abertas. Falha em silêncio (fica `null` e
+     * o atalho some) — é informação de apoio, e uma queda de rede não pode
+     * transformar a Home num amontoado de mensagens de erro.
+     */
+    fun loadOpenTabsCount() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val locationId = authRepository.currentLocationId() ?: return
+        viewModelScope.launch {
+            runCatching { operationRepository.searchOpenTabs(organizationId, locationId) }
+                .onSuccess { tabs -> _state.value = _state.value.copy(openTabsCount = tabs.size) }
+        }
     }
 
     /**
@@ -175,6 +194,7 @@ class HomeViewModel @Inject constructor(
                 _state.value = _state.value.copy(access = authRepository.currentAccess())
             }
         }
+        loadOpenTabsCount()
     }
 
     fun dismissPendingAttempt() {

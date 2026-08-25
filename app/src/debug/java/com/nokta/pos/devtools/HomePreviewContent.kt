@@ -68,11 +68,19 @@ fun HomePreviewContent(variant: String? = null) {
             locationName = "Nokta Bar e Restaurante · Unidade Barra da Tijuca",
             access = OperatorAccess.PERMISSIVE,
         )
+        // Sem nada em aberto: o badge some, o rótulo muda.
+        "empty" -> HomeUiState(
+            operatorName = "Vitor",
+            locationName = "Unidade Principal",
+            access = OperatorAccess.PERMISSIVE,
+            openTabsCount = 0,
+        )
         else -> HomeUiState(
             operatorName = "Vitor",
             operatorRole = "OWNER",
             locationName = "Unidade Principal",
             access = OperatorAccess.PERMISSIVE,
+            openTabsCount = 3,
         )
     }
 
@@ -81,6 +89,7 @@ fun HomePreviewContent(variant: String? = null) {
         onNovaVenda = {},
         onMesas = {},
         onComandas = {},
+        onHistorico = {},
         onLogout = {},
     )
 }

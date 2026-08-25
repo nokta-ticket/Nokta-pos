@@ -74,6 +74,24 @@ class OperationRepository @Inject constructor(
         search = search?.trim()?.takeIf { it.isNotEmpty() },
     ).map { it.toDomain() }
 
+    /**
+     * Vendas já encerradas, da mais recente para a mais antiga.
+     *
+     * Reaproveita o mesmo `listTabs` da busca, só trocando o status — o
+     * backend já ordena por `openedAt desc`. `limit` corta no cliente porque
+     * o endpoint não pagina (devolve até 100), e o histórico do POS é uma
+     * consulta rápida de balcão, não um relatório.
+     */
+    suspend fun listRecentClosedTabs(
+        organizationId: Long,
+        locationId: Long,
+        limit: Int = 20,
+    ): List<Tab> = api.listTabs(
+        organizationId = organizationId,
+        locationId = locationId,
+        status = TabStatus.CLOSED.name,
+    ).take(limit).map { it.toDomain() }
+
     /** Mesas da unidade, já com a comanda aberta de cada uma (1 chamada). */
     suspend fun listTables(organizationId: Long, locationId: Long): List<VenueTable> =
         api.listTables(organizationId, locationId).map { it.toDomain() }
