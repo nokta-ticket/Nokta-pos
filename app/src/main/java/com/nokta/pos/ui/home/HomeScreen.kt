@@ -276,7 +276,7 @@ private fun StatusRow(state: HomeUiState) {
         ConnectionState.ONLINE -> NoktaOnline
         ConnectionState.SYNCING -> NoktaAccentBlue
         ConnectionState.PENDING -> WarningAmber
-        ConnectionState.OFFLINE -> NoktaMutedSoft
+        ConnectionState.OFFLINE -> AlertRed
         ConnectionState.OFFLINE_PENDING -> AlertRed
     }
 
@@ -292,9 +292,10 @@ private fun StatusRow(state: HomeUiState) {
         ConnectionState.ONLINE -> "Sincronizado agora"
         ConnectionState.SYNCING -> "Enviando dados…"
         ConnectionState.PENDING -> "$pending ${if (pending == 1) "operação" else "operações"} na fila"
-        // Sem fila, a informação útil é "o que fiz já subiu, e quando".
+        // Sem fila, o operador ainda precisa saber que está sem rede — a
+        // mensagem não pode soar neutra só porque não há venda presa.
         ConnectionState.OFFLINE -> state.lastSyncAt
-            ?.let { "Última sync: ${relativeSince(it)}" }
+            ?.let { "Sem conexão — sincronizado ${relativeSince(it)}" }
             ?: "Sem conexão"
         // Com fila, o risco real é desligar o terminal com venda presa nele.
         ConnectionState.OFFLINE_PENDING ->
@@ -305,7 +306,7 @@ private fun StatusRow(state: HomeUiState) {
     // ficam cinza para não competir com a ação principal.
     val detailColor = when (connection) {
         ConnectionState.PENDING -> WarningAmber
-        ConnectionState.OFFLINE_PENDING -> AlertRed
+        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> AlertRed
         else -> NoktaMutedSoft
     }
 
