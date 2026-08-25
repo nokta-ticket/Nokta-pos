@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,6 +92,15 @@ fun CardapioScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // A grid nunca reseta o próprio scroll quando o conteúdo muda de tamanho
+    // (LazyVerticalGrid não sabe "por que" a lista mudou) — sem isto, digitar
+    // ou limpar a busca deixava a tela parada na posição de rolagem antiga,
+    // sobre um resultado diferente do que está sendo mostrado agora.
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(state.query, state.selectedCategoryId) {
+        gridState.scrollToItem(0)
+    }
+
     Scaffold(
         topBar = { PosTopBar(title = title, subtitle = subtitle, onBack = onDone) },
         containerColor = NoktaBackground,
@@ -134,6 +144,7 @@ fun CardapioScreen(
                         )
                         else -> LazyVerticalGrid(
                             columns = GridCells.Fixed(2),
+                            state = gridState,
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
                                 start = Dim.ScreenPad,
