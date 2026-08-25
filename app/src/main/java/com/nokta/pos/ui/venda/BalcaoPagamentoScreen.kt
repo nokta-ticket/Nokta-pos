@@ -57,6 +57,9 @@ fun BalcaoPagamentoScreen(
                     PosPrimaryButton(
                         text = when {
                             state.isProcessing -> state.statusMessage ?: "Processando…"
+                            // Cartão já aprovado e registro pendente: o texto
+                            // deixa claro que isto NÃO cobra de novo.
+                            state.awaitingRegistrationRetry -> "Tentar salvar de novo"
                             state.selectedMethod == PosPaymentOption.CASH -> "Confirmar recebimento"
                             else -> "Cobrar ${state.total.formatBRL()}"
                         },

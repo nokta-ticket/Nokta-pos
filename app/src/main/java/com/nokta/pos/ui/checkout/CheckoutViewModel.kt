@@ -222,6 +222,24 @@ class CheckoutViewModel @Inject constructor(
         _state.value = _state.value.copy(isProcessingPayment = false, paymentMessage = message)
     }
 
+    /**
+     * Traduz a recusa do backend por caixa fechado.
+     *
+     * `requireOpenCashSessionForPayments` (ligado por padrão) faz o servidor
+     * recusar qualquer pagamento sem caixa aberto. A mensagem crua não diz ao
+     * garçom o que fazer, e ele não abre caixa pelo POS — é ação de gerente
+     * no dashboard.
+     */
+    private fun humanizeError(raw: String?): String {
+        val message = raw ?: "Falha ao registrar o pagamento."
+        return if (message.contains("caixa", ignoreCase = true)) {
+            "O caixa desta unidade está fechado, e o sistema exige caixa aberto para receber pagamentos. " +
+                "Peça ao gerente para abrir o caixa no painel (Operação › Caixa)."
+        } else {
+            message
+        }
+    }
+
     private suspend fun register(
         organizationId: Long,
         tab: Tab,
@@ -263,7 +281,7 @@ class CheckoutViewModel @Inject constructor(
                 paymentMessage = if (approvedOnCard) {
                     "Cartão aprovado, mas falhou ao salvar (${e.message}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
                 } else {
-                    e.message ?: "Falha ao registrar o pagamento."
+                    humanizeError(e.message)
                 },
             )
         }

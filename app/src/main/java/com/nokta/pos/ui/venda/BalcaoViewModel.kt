@@ -38,6 +38,12 @@ data class BalcaoUiState(
     val statusMessage: String? = null,
     val errorMessage: String? = null,
     val tab: Tab? = null,
+    /**
+     * Cobrança JÁ capturada no cartão cujo registro no Nokta falhou. Enquanto
+     * true, o botão principal vira "tentar salvar de novo" e reusa a mesma
+     * idempotencyKey — nunca dispara uma segunda cobrança.
+     */
+    val awaitingRegistrationRetry: Boolean = false,
 ) {
     val total: Money get() = cart.total
     val changeDue: Money?
@@ -81,6 +87,20 @@ class BalcaoViewModel @Inject constructor(
     /** Comanda já aberta numa tentativa anterior que falhou depois — reaproveitada, nunca duplicada. */
     private var openedTabId: Long? = null
 
+    /**
+     * Cobrança já aprovada na adquirente aguardando registro. Guardada para
+     * que o retry vá DIRETO ao registro, sem passar pela Cielo de novo — o
+     * dinheiro já saiu da conta do cliente.
+     */
+    private var approvedAwaitingRegistration: ApprovedCharge? = null
+
+    private data class ApprovedCharge(
+        val method: String,
+        val amount: Money,
+        val externalReference: String?,
+        val receivedCents: Long?,
+    )
+
     fun setCart(cart: Cart) { _state.value = _state.value.copy(cart = cart) }
 
     fun goToPayment() {
@@ -95,6 +115,10 @@ class BalcaoViewModel @Inject constructor(
      */
     fun backToCart() {
         if (_state.value.isProcessing) return
+        // Com cobrança aprovada e registro pendente, voltar ao carrinho
+        // esconderia uma venda cobrada e não registrada. O único caminho é
+        // concluir o registro.
+        if (_state.value.awaitingRegistrationRetry) return
         _state.value = _state.value.copy(stage = BalcaoStage.CART, errorMessage = null, statusMessage = null)
     }
 
@@ -116,13 +140,34 @@ class BalcaoViewModel @Inject constructor(
 
     fun dismissError() { _state.value = _state.value.copy(errorMessage = null) }
 
-    fun confirmPayment(onFinished: () -> Unit) {
+    /**
+     * Confirma o pagamento. A tela reage ao `stage` do estado (PAYING → DONE),
+     * não a callback — assim uma recomposição no meio do processo nunca perde
+     * o resultado nem dispara a navegação duas vezes.
+     */
+    fun confirmPayment() {
         val organizationId = authRepository.currentOrganizationId() ?: return
         val locationId = authRepository.currentLocationId() ?: return
         val current = _state.value
         if (current.cart.isEmpty || current.isProcessing) return
 
         _state.value = current.copy(isProcessing = true, errorMessage = null, stage = BalcaoStage.PAYING)
+
+        // Cobrança já aprovada, só o registro falhou: repete o REGISTRO, nunca
+        // a cobrança. Mesmas chaves de idempotência, mesma comanda.
+        approvedAwaitingRegistration?.let { approved ->
+            viewModelScope.launch {
+                finalizeSale(
+                    organizationId = organizationId,
+                    locationId = locationId,
+                    method = approved.method,
+                    amount = approved.amount,
+                    receivedCents = approved.receivedCents,
+                    externalReference = approved.externalReference,
+                )
+            }
+            return
+        }
 
         viewModelScope.launch {
             when (current.selectedMethod) {
@@ -138,11 +183,10 @@ class BalcaoViewModel @Inject constructor(
                         amount = current.total,
                         receivedCents = current.receivedCents,
                         externalReference = null,
-                        onFinished = onFinished,
                     )
                 }
                 PosPaymentOption.DEBIT_CARD, PosPaymentOption.CREDIT_CARD -> {
-                    chargeCardThenFinalize(organizationId, locationId, current, onFinished)
+                    chargeCardThenFinalize(organizationId, locationId, current)
                 }
             }
         }
@@ -152,7 +196,6 @@ class BalcaoViewModel @Inject constructor(
         organizationId: Long,
         locationId: Long,
         current: BalcaoUiState,
-        onFinished: () -> Unit,
     ) {
         val method = if (current.selectedMethod == PosPaymentOption.DEBIT_CARD) {
             PosPaymentMethod.DEBIT_CARD
@@ -183,7 +226,6 @@ class BalcaoViewModel @Inject constructor(
                 amount = result.amount,
                 receivedCents = null,
                 externalReference = result.providerTransactionId,
-                onFinished = onFinished,
             )
             is PaymentResult.Declined -> failPayment("Pagamento recusado: ${result.reason}")
             is PaymentResult.Cancelled -> failPayment("Pagamento cancelado no terminal.")
@@ -206,6 +248,25 @@ class BalcaoViewModel @Inject constructor(
     }
 
     /**
+     * Traduz a recusa do backend por caixa fechado.
+     *
+     * `requireOpenCashSessionForPayments` (ligado por padrão) faz o servidor
+     * recusar QUALQUER pagamento enquanto não houver caixa aberto na unidade.
+     * A mensagem crua ("É necessário abrir o caixa...") não diz ao garçom o
+     * que fazer, e ele não tem como abrir caixa pelo POS — é ação de gerente
+     * no dashboard. Aqui explicitamos isso.
+     */
+    private fun humanizeError(raw: String?): String {
+        val message = raw ?: "Não foi possível registrar a venda."
+        return if (message.contains("caixa", ignoreCase = true)) {
+            "O caixa desta unidade está fechado, e o sistema exige caixa aberto para receber pagamentos. " +
+                "Peça ao gerente para abrir o caixa no painel (Operação › Caixa)."
+        } else {
+            message
+        }
+    }
+
+    /**
      * Materializa a venda no backend depois que o dinheiro já está garantido.
      * Cada passo é idempotente e reaproveita o que já deu certo numa tentativa
      * anterior — um retry nunca abre uma segunda comanda nem cobra de novo.
@@ -217,7 +278,6 @@ class BalcaoViewModel @Inject constructor(
         amount: Money,
         receivedCents: Long?,
         externalReference: String?,
-        onFinished: () -> Unit,
     ) {
         _state.value = _state.value.copy(statusMessage = "Registrando a venda…")
 
@@ -252,14 +312,21 @@ class BalcaoViewModel @Inject constructor(
             }
             paidTab
         }.onSuccess { tab ->
+            approvedAwaitingRegistration = null
             _state.value = _state.value.copy(
                 isProcessing = false,
                 stage = BalcaoStage.DONE,
                 statusMessage = null,
+                awaitingRegistrationRetry = false,
                 tab = tab,
             )
-            onFinished()
         }.onFailure { e ->
+            // Cartão aprovado: guarda a cobrança para o retry ir direto ao
+            // registro. Dinheiro/PIX não precisa disso — nada foi capturado
+            // por terceiro, o operador pode simplesmente tentar de novo.
+            if (externalReference != null) {
+                approvedAwaitingRegistration = ApprovedCharge(method, amount, externalReference, receivedCents)
+            }
             // O dinheiro pode já ter sido capturado (cartão aprovado) e a
             // falha ser só de registro. NUNCA cobrar de novo: o retry
             // reaproveita a mesma comanda e a mesma idempotencyKey.
@@ -267,20 +334,28 @@ class BalcaoViewModel @Inject constructor(
                 isProcessing = false,
                 stage = BalcaoStage.PAYING,
                 statusMessage = null,
+                awaitingRegistrationRetry = externalReference != null,
                 errorMessage = if (externalReference != null) {
                     "Cartão aprovado, mas falhou ao salvar no sistema (${e.message}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
                 } else {
-                    e.message ?: "Não foi possível registrar a venda."
+                    humanizeError(e.message)
                 },
             )
         }
     }
 
-    /** Recomeça uma venda nova, limpando as chaves de idempotência. */
+    /**
+     * Recomeça uma venda nova, com chaves de idempotência novas.
+     *
+     * Recusa enquanto houver cobrança aprovada sem registro: zerar as chaves
+     * nesse ponto tornaria impossível reconciliar o dinheiro já capturado.
+     */
     fun reset() {
+        if (_state.value.awaitingRegistrationRetry) return
         paymentIdempotencyKey = UUID.randomUUID().toString()
         orderClientRequestId = UUID.randomUUID().toString()
         openedTabId = null
+        approvedAwaitingRegistration = null
         _state.value = BalcaoUiState()
     }
 }

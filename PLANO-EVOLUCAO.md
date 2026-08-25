@@ -109,6 +109,42 @@ Este documento é o registro da análise e do plano; o estado de execução fica
 
 ---
 
-## PARTE 3 — EXECUÇÃO
+## PARTE 3 — EXECUÇÃO (concluída em 2026-08-24)
 
-(atualizado conforme o trabalho avança)
+### Entregue
+
+| Fase | Estado | Onde |
+|---|---|---|
+| 1 — Navegação/sessão/permissões | ✅ | `ui/splash/`, `session/SessionEvents`, `network/UnauthorizedInterceptor`, `access/OperatorAccess`, `ui/theme/`, `ui/components/` |
+| 2 — Venda de balcão | ✅ | `ui/venda/` (ViewModel + 2 telas) |
+| 3 — Mesa | ✅ | `ui/mesa/` |
+| 4 — Comanda por número | ✅ | `ui/comanda/BuscarComanda*` (QR removido da navegação) |
+| 5 — Consumo real | ✅ | `OperationDtos`/`ComandaModels`/`ComandaScreen` |
+| 6 — Parcial e divisão | ✅ | `payment/domain/SplitCalculator`, `ui/checkout/` |
+| 7 — Histórico operacional | ✅ | Detalhe da comanda (itens + pagamentos + status) |
+| 8 — Offline/outbox | ✅ | `sync/` |
+| 9 — Cielo | ✅ (reuso) | Provider intocado; balcão cobra ANTES de criar comanda |
+| 10 — Testes | ✅ | 35/35 (19 novos) |
+
+### Backend (commit `f5ef4dc`, deployado e verificado em produção)
+
+- `POST /auth/device-login` devolve `nome`/`sobrenome`, `mainMenu` e `posConfig`.
+- `VenueOperationSettings.blockTabCloseWithPendingItems` (default `false`) — migration additive-only.
+- `checkTabCanClose` ganhou 3º parâmetro; saldo restante continua bloqueando sempre.
+- 463/463 testes do backend passando.
+
+### Nenhum endpoint novo foi criado
+
+Tudo saiu de endpoints existentes. A venda de balcão usa a mesma sequência de qualquer comanda (`createTab` → `createOrder` → `sendOrder` → `createPayment` → `closeTab`), então a ledger é idêntica — a simplicidade vive só na interface.
+
+### Verificado no emulador
+
+App instalado e aberto sem crash; splash foi direto à Home (terminal já pareado); navegação Home → Nova venda funcionando; logout preservou o pareamento (voltou ao login, não ao pareamento). `device-login` em produção responde 403 sem `X-Device-Token`.
+
+### Pendências conscientes
+
+1. **Fluxo de venda ponta a ponta não foi executado com dados reais** — exige senha do operador e um cardápio principal definido na organização de teste. O caminho falha hoje com a mensagem correta ("Nenhum cardápio principal definido para esta unidade") em vez de quebrar.
+2. **`requireOpenCashSessionForPayments` continua `true` por padrão** — se o caixa não estiver aberto, todo pagamento é recusado pelo backend. O app já recebe essa flag no login, mas ainda não avisa antes da cobrança. É a próxima fricção provável em campo.
+3. **PIX é registro manual** — o operador confirma no app do banco. Não há integração de liquidação.
+4. **Testes rodam só com Gradle home sem acento** (ver `gradle.properties`).
+5. **Scanner de QR permanece no código**, sem tela apontando para ele — removido da navegação, não apagado.
