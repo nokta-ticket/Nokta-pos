@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Só o flavor development (API_BASE_URL = http://10.0.2.2:3333/, o backend
+  local visto de dentro do emulador) precisa de cleartext — staging e
+  production sempre falam HTTPS e continuam bloqueando texto puro pelo
+  usesCleartextTraffic="false" do manifesto principal. Este arquivo só é
+  empacotado quando o flavor é development (ver app/src/development/).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
