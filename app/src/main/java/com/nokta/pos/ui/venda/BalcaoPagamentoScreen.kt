@@ -66,6 +66,7 @@ fun BalcaoPagamentoScreen(
     onSelectMethod: (PosPaymentOption) -> Unit,
     onSetInstallments: (Int) -> Unit,
     onSetReceived: (Long?) -> Unit,
+    onSetSplitPeople: (Int?) -> Unit,
     onConfirm: () -> Unit,
     onBack: () -> Unit,
     onDismissError: () -> Unit,
@@ -105,6 +106,22 @@ fun BalcaoPagamentoScreen(
             }
 
             Spacer(Modifier.height(Dim.SectionGap))
+            SectionLabel("Quanto cobrar agora")
+            Spacer(Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AmountModeChip("Tudo", state.splitPeople == null, Modifier.weight(1f)) { onSetSplitPeople(null) }
+                AmountModeChip("Dividir", state.splitPeople != null, Modifier.weight(1f)) { onSetSplitPeople(state.splitPeople ?: 2) }
+            }
+
+            state.splitPeople?.let { people ->
+                SplitSection(people = people, paidParts = state.paidParts, remaining = state.remaining, onSetPeople = onSetSplitPeople)
+            }
+
+            Spacer(Modifier.height(12.dp))
+            AmountField(amount = state.amountToCharge)
+
+            Spacer(Modifier.height(Dim.SectionGap))
             SectionLabel("Forma de pagamento")
             Spacer(Modifier.height(10.dp))
 
@@ -142,7 +159,7 @@ fun BalcaoPagamentoScreen(
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     AmountChip(label = "Exato", selected = state.receivedCents == null, onClick = { onSetReceived(null) }, modifier = Modifier.weight(1f))
-                    cashSuggestions(state.total).forEach { cents ->
+                    cashSuggestions(state.amountToCharge).forEach { cents ->
                         AmountChip(
                             label = Money(cents).formatBRL().removePrefix("R$ "),
                             selected = state.receivedCents == cents,
@@ -165,8 +182,9 @@ fun BalcaoPagamentoScreen(
             ConfirmButton(
                 text = when {
                     state.awaitingRegistrationRetry -> "Tentar salvar de novo"
-                    state.selectedMethod == PosPaymentOption.CASH -> "Confirmar recebimento"
-                    else -> "Cobrar ${state.total.formatBRL()}"
+                    state.selectedMethod == PosPaymentOption.CASH ->
+                        "Confirmar recebimento" + (state.partLabel?.let { " ($it)" } ?: "")
+                    else -> "Cobrar ${state.amountToCharge.formatBRL()}" + (state.partLabel?.let { " — $it" } ?: "")
                 },
                 enabled = state.canConfirmCash,
                 loading = state.isProcessing,
@@ -275,6 +293,71 @@ private fun OrderItemRow(line: CartLine) {
 
         Spacer(Modifier.width(8.dp))
         Text(line.lineTotal.formatBRL(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+    }
+}
+
+@Composable
+private fun AmountModeChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) NoktaPurpleBright else NoktaSurface)
+            .border(1.dp, if (selected) NoktaPurpleBright else FieldBorder, RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) Color.White else NoktaInkSoft, textAlign = TextAlign.Center, maxLines = 1)
+    }
+}
+
+@Composable
+private fun AmountField(amount: Money) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(12.dp)).background(NoktaSurface).border(1.dp, FieldBorder, RoundedCornerShape(12.dp)).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(amount.formatBRL(), fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = NoktaInk)
+    }
+}
+
+/**
+ * Divisão igual — mostra quanto cada pessoa deve, e quantas partes já foram
+ * cobradas. O valor cobrado AGORA (`amountToCharge`) é sempre a parte de 1
+ * pessoa dividindo o que ainda falta pelas pessoas que ainda não pagaram —
+ * nunca o total original recalculado, senão a última parte ficaria errada
+ * quando as partes anteriores não fecham exato por causa do centavo.
+ */
+@Composable
+private fun SplitSection(people: Int, paidParts: Int, remaining: Money, onSetPeople: (Int?) -> Unit) {
+    Spacer(Modifier.height(14.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        FilledTonalIconButton(onClick = { onSetPeople((people - 1).coerceAtLeast(paidParts + 1)) }, enabled = people > 2 && people > paidParts + 1, modifier = Modifier.size(48.dp)) {
+            Text("−", style = MaterialTheme.typography.headlineSmall)
+        }
+        Text("$people pessoas", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), textAlign = TextAlign.Center)
+        FilledTonalIconButton(onClick = { onSetPeople(people + 1) }, modifier = Modifier.size(48.dp)) {
+            Text("+", style = MaterialTheme.typography.headlineSmall)
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    val peopleLeft = (people - paidParts).coerceAtLeast(1)
+    val parts = com.nokta.pos.payment.domain.SplitCalculator.splitRemaining(remaining, peopleLeft)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PageGray).padding(14.dp)) {
+        parts.forEachIndexed { index, part ->
+            val personNumber = paidParts + index + 1
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    if (personNumber <= paidParts) "Pessoa $personNumber (paga)" else "Pessoa $personNumber",
+                    fontSize = 13.sp,
+                    color = NoktaMuted,
+                )
+                Text(part.formatBRL(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (index == 0) NoktaPurple else NoktaInk)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Cobrando a parte da próxima pessoa agora.", fontSize = 11.sp, color = NoktaMutedSoft)
     }
 }
 

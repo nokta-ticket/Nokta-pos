@@ -13,6 +13,7 @@ import com.nokta.pos.payment.domain.PaymentProvider
 import com.nokta.pos.payment.domain.PaymentRequest
 import com.nokta.pos.payment.domain.PaymentResult
 import com.nokta.pos.payment.domain.PosPaymentMethod
+import com.nokta.pos.payment.domain.SplitCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,12 +46,37 @@ data class BalcaoUiState(
      * idempotencyKey — nunca dispara uma segunda cobrança.
      */
     val awaitingRegistrationRetry: Boolean = false,
+    /**
+     * Divisão por pessoas — puramente sobre COMO a cobrança é fatiada em
+     * múltiplas transações; a venda continua sendo uma comanda COUNTER só,
+     * fechada quando a última parte for paga (mesmo `finalizeSale` de
+     * sempre). `null` = sem divisão, cobra o total numa tacada.
+     */
+    val splitPeople: Int? = null,
+    /** Quantas partes já foram cobradas com sucesso nesta venda. */
+    val paidParts: Int = 0,
 ) {
     val total: Money get() = cart.total
+
+    /** Quanto ainda falta cobrar — total na primeira cobrança, ou o que sobrou depois de partes já pagas. */
+    val remaining: Money get() = tab?.remaining ?: total
+
+    /** Quanto cobrar AGORA: a parte de 1 pessoa (dividindo o que resta pelas pessoas que ainda faltam pagar), ou tudo de uma vez. */
+    val amountToCharge: Money
+        get() {
+            val people = splitPeople ?: return remaining
+            val peopleLeft = (people - paidParts).coerceAtLeast(1)
+            return SplitCalculator.splitRemaining(remaining, peopleLeft).first()
+        }
+
     val changeDue: Money?
-        get() = receivedCents?.takeIf { it > total.cents }?.let { Money(it - total.cents) }
+        get() = receivedCents?.takeIf { it > amountToCharge.cents }?.let { Money(it - amountToCharge.cents) }
     val canConfirmCash: Boolean
-        get() = selectedMethod != PosPaymentOption.CASH || receivedCents == null || receivedCents >= total.cents
+        get() = selectedMethod != PosPaymentOption.CASH || receivedCents == null || receivedCents >= amountToCharge.cents
+
+    /** Rótulo do botão de confirmar quando há divisão: "Cobrar parte 2 de 4". */
+    val partLabel: String?
+        get() = splitPeople?.let { people -> "parte ${paidParts + 1} de $people" }
 }
 
 /**
@@ -83,12 +109,21 @@ class BalcaoViewModel @Inject constructor(
     val state: StateFlow<BalcaoUiState> = _state
 
     /**
-     * Mesma chave em toda tentativa desta venda — impede pagamento duplicado
-     * no retry. Guardadas em [SavedStateHandle] (sobrevive à recriação do
-     * processo pelo Android, não só rotação de tela) — sem isso, um processo
-     * morto no meio de "cartão aprovado, registro pendente" perderia o
-     * rastro de que já existe uma cobrança feita, arriscando um retry que
-     * abriria uma segunda comanda para o mesmo dinheiro já capturado.
+     * Mesma chave em toda tentativa da PARTE atual — impede pagamento
+     * duplicado no retry. Guardadas em [SavedStateHandle] (sobrevive à
+     * recriação do processo pelo Android, não só rotação de tela) — sem
+     * isso, um processo morto no meio de "cartão aprovado, registro
+     * pendente" perderia o rastro de que já existe uma cobrança feita,
+     * arriscando um retry que abriria uma segunda comanda para o mesmo
+     * dinheiro já capturado.
+     *
+     * Sem divisão, é uma única chave para a venda inteira (comportamento de
+     * sempre). Com divisão, cada parte precisa da SUA PRÓPRIA chave — a
+     * mesma chave em duas partes diferentes faria o backend enxergar a
+     * segunda cobrança como retry da primeira e nunca registrar o pagamento
+     * da segunda pessoa. `advanceToNextPart` gera uma chave nova ao avançar;
+     * um retry da MESMA parte (falha de registro, cartão já aprovado) reusa
+     * a que já está salva.
      */
     private var paymentIdempotencyKey: String
         get() = savedStateHandle.get<String>(KEY_PAYMENT_IDEMPOTENCY) ?: UUID.randomUUID().toString().also { savedStateHandle[KEY_PAYMENT_IDEMPOTENCY] = it }
@@ -135,6 +170,10 @@ class BalcaoViewModel @Inject constructor(
         // esconderia uma venda cobrada e não registrada. O único caminho é
         // concluir o registro.
         if (_state.value.awaitingRegistrationRetry) return
+        // Com uma parte da divisão já paga, mudar o carrinho mudaria o total
+        // depois que uma pessoa já pagou a parte dela sobre o valor antigo —
+        // o dinheiro já registrado ficaria inconsistente com o novo total.
+        if (_state.value.paidParts > 0) return
         _state.value = _state.value.copy(stage = BalcaoStage.CART, errorMessage = null, statusMessage = null)
     }
 
@@ -149,6 +188,15 @@ class BalcaoViewModel @Inject constructor(
 
     fun setInstallments(installments: Int) {
         _state.value = _state.value.copy(installments = installments.coerceIn(1, 12))
+    }
+
+    /**
+     * Liga/ajusta a divisão por pessoas. `null` desliga — volta a cobrar o
+     * total numa tacada só. Puramente sobre COMO a cobrança é fatiada; nunca
+     * muda o total da venda nem cria mais de uma comanda.
+     */
+    fun setSplitPeople(people: Int?) {
+        _state.value = _state.value.copy(splitPeople = people?.coerceIn(2, 20), receivedCents = null)
     }
 
     /** Valor entregue pelo cliente em dinheiro — o troco é calculado, nunca digitado. */
@@ -196,7 +244,7 @@ class BalcaoViewModel @Inject constructor(
                         organizationId = organizationId,
                         locationId = locationId,
                         method = current.selectedMethod.name,
-                        amount = current.total,
+                        amount = current.amountToCharge,
                         receivedCents = current.receivedCents,
                         externalReference = null,
                     )
@@ -229,7 +277,7 @@ class BalcaoViewModel @Inject constructor(
         val result = paymentProvider.startPayment(
             PaymentRequest(
                 tabId = knownTabId ?: 0L,
-                amount = current.total,
+                amount = current.amountToCharge,
                 method = method,
                 installments = if (method == PosPaymentMethod.CREDIT_CARD) current.installments else 0,
                 attemptId = paymentIdempotencyKey,
@@ -335,13 +383,30 @@ class BalcaoViewModel @Inject constructor(
             paidTab
         }.onSuccess { tab ->
             approvedAwaitingRegistration = null
-            _state.value = _state.value.copy(
-                isProcessing = false,
-                stage = BalcaoStage.DONE,
-                statusMessage = null,
-                awaitingRegistrationRetry = false,
-                tab = tab,
-            )
+            if (tab.isFullyPaid) {
+                _state.value = _state.value.copy(
+                    isProcessing = false,
+                    stage = BalcaoStage.DONE,
+                    statusMessage = null,
+                    awaitingRegistrationRetry = false,
+                    tab = tab,
+                )
+            } else {
+                // Ainda falta gente pagar: volta para a tela de pagamento com
+                // a próxima parte pronta — nunca fecha a venda no meio da
+                // divisão, e nunca reusa a chave de idempotência da parte que
+                // acabou de ser confirmada.
+                advanceToNextPart()
+                _state.value = _state.value.copy(
+                    isProcessing = false,
+                    stage = BalcaoStage.PAYING,
+                    statusMessage = null,
+                    awaitingRegistrationRetry = false,
+                    receivedCents = null,
+                    tab = tab,
+                    paidParts = _state.value.paidParts + 1,
+                )
+            }
         }.onFailure { e ->
             // Cartão aprovado: guarda a cobrança para o retry ir direto ao
             // registro. Dinheiro/PIX não precisa disso — nada foi capturado
@@ -364,6 +429,16 @@ class BalcaoViewModel @Inject constructor(
                 },
             )
         }
+    }
+
+    /**
+     * Gera uma chave de idempotência nova para a PRÓXIMA parte da divisão.
+     * Nunca reaproveita a chave da parte que acabou de ser confirmada — isso
+     * faria o backend enxergar a cobrança da 2ª pessoa como um retry da 1ª e
+     * nunca registrar o segundo pagamento.
+     */
+    private fun advanceToNextPart() {
+        paymentIdempotencyKey = UUID.randomUUID().toString()
     }
 
     /**

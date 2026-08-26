@@ -48,6 +48,7 @@ fun NovaVendaScreen(
             onSelectMethod = viewModel::selectMethod,
             onSetInstallments = viewModel::setInstallments,
             onSetReceived = viewModel::setReceived,
+            onSetSplitPeople = viewModel::setSplitPeople,
             onConfirm = viewModel::confirmPayment,
             onBack = { viewModel.backToCart() },
             onDismissError = viewModel::dismissError,
