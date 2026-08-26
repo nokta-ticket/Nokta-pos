@@ -51,6 +51,7 @@ data class TabEntity(
     val subtotalCents: Long,
     val discountCents: Long,
     val serviceChargeCents: Long,
+    val serviceChargeRateBps: Int = 0,
     val totalCents: Long,
     val paidCents: Long,
     val remainingCents: Long,

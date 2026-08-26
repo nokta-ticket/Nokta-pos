@@ -168,6 +168,8 @@ data class Tab(
     val subtotal: Money,
     val discount: Money,
     val serviceCharge: Money,
+    /** Percentual configurado no dashboard (base 10000 = 100%) — só para exibição, o valor cobrado é sempre [serviceCharge]. */
+    val serviceChargeRateBps: Int = 0,
     val total: Money,
     val paid: Money,
     val remaining: Money,
@@ -184,6 +186,9 @@ data class Tab(
 
     /** Itens que contam para o consumo — cancelado continua visível no histórico, mas não aqui. */
     val activeItems get() = items.filterNot { it.status.isCanceled }
+
+    /** "12%" a partir dos basis points — só exibição, nunca usado para recalcular o valor cobrado. */
+    val serviceChargeRateLabel: String? get() = serviceChargeRateBps.takeIf { it > 0 }?.let { "${it / 100}%" }
 
     /** Quantos itens ainda não foram entregues — informativo, nunca trava cobrança. */
     val pendingItemCount get() = activeItems.count { !it.status.isDelivered }

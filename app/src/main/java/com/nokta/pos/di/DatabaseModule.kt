@@ -20,7 +20,15 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): NoktaDatabase =
-        Room.databaseBuilder(context, NoktaDatabase::class.java, "nokta_pos.db").build()
+        Room.databaseBuilder(context, NoktaDatabase::class.java, "nokta_pos.db")
+            // Projeto ainda não publicado (ver comentário em NoktaDatabase) —
+            // schema muda com frequência nesta fase, e nenhum dado local
+            // sobrevivendo a uma reinstalação importa ainda. Apagar e
+            // recriar o banco no próximo boot após qualquer mudança de
+            // schema evita escrever uma Migration manual por coluna nova.
+            // Trocar por Migrations reais antes do primeiro lançamento.
+            .fallbackToDestructiveMigration()
+            .build()
 
     @Provides
     fun provideMenuDao(db: NoktaDatabase): MenuDao = db.menuDao()

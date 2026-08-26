@@ -124,6 +124,7 @@ class SyncEngine @Inject constructor(
                         tabLocal.copy(
                             serverId = response.id, publicCode = response.publicCode, syncState = SyncState.SYNCED,
                             lastSyncedAtEpochMs = System.currentTimeMillis(), subtotalCents = response.subtotalCents,
+                            serviceChargeCents = response.serviceChargeCents, serviceChargeRateBps = response.serviceChargeRateBps,
                             totalCents = response.totalCents, paidCents = response.paidCents, remainingCents = response.remainingCents,
                             openedAt = response.openedAt,
                         ),
@@ -179,7 +180,8 @@ class SyncEngine @Inject constructor(
         tabDao.updateTab(
             local.copy(
                 publicCode = response.publicCode, subtotalCents = response.subtotalCents, discountCents = response.discountCents,
-                serviceChargeCents = response.serviceChargeCents, totalCents = response.totalCents, paidCents = response.paidCents,
+                serviceChargeCents = response.serviceChargeCents, serviceChargeRateBps = response.serviceChargeRateBps,
+                totalCents = response.totalCents, paidCents = response.paidCents,
                 remainingCents = response.remainingCents, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = System.currentTimeMillis(),
             ),
         )

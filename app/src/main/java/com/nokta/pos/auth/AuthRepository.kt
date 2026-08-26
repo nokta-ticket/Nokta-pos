@@ -91,7 +91,23 @@ class AuthRepository @Inject constructor(
         refreshAccess(organizationId)
 
         LoginOutcome.Success(userName = user.displayName, role = user.role)
-    }.getOrElse { LoginOutcome.Failed(it.message ?: "Não foi possível entrar. Verifique a conexão.") }
+    }.getOrElse { LoginOutcome.Failed(humanizeLoginError(it)) }
+
+    /**
+     * `HttpException.message` do Retrofit é algo como "HTTP 403 Forbidden" —
+     * não diz nada útil ao operador. 401/403 no login sempre significa
+     * credencial errada (device-login não distingue "e-mail não existe" de
+     * "senha errada", por segurança); qualquer outro código HTTP ou falha de
+     * rede usa a mensagem genérica.
+     */
+    private fun humanizeLoginError(e: Throwable): String {
+        val code = (e as? retrofit2.HttpException)?.code()
+        return when (code) {
+            401, 403 -> "E-mail ou senha incorretos."
+            null -> "Não foi possível entrar. Verifique a conexão."
+            else -> "Não foi possível entrar (erro $code). Tente novamente."
+        }
+    }
 
     /** Relê as permissões do operador. Silencioso por design — ver comentário em `login`. */
     suspend fun refreshAccess(organizationId: Long) {

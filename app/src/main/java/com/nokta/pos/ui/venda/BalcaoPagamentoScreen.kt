@@ -5,29 +5,60 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Pix
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nokta.pos.cart.CartLine
 import com.nokta.pos.common.Money
 import com.nokta.pos.ui.components.*
 import com.nokta.pos.ui.theme.MoneyGreen
+import com.nokta.pos.ui.theme.NoktaBorder
+import com.nokta.pos.ui.theme.NoktaInk
+import com.nokta.pos.ui.theme.NoktaInkSoft
+import com.nokta.pos.ui.theme.NoktaMuted
+import com.nokta.pos.ui.theme.NoktaMutedSoft
+import com.nokta.pos.ui.theme.NoktaPurple
+import com.nokta.pos.ui.theme.NoktaPurpleBright
+import com.nokta.pos.ui.theme.NoktaSurface
+
+private object Dim {
+    val ScreenPad = 16.dp
+    val CardRadius = 14.dp
+    val SectionGap = 18.dp
+}
+
+private val PageGray = Color(0xFFF7F6FA)
+private val SelectedTint = Color(0xFFF7F1FE)
+private val FieldBorder = Color(0xFFE7E4EF)
 
 /**
  * Pagamento da venda de balcão. Uma tela só: escolher forma, confirmar,
  * pronto. Não há passo intermediário de "comanda" nem de "checkout" — no
  * balcão o cliente está esperando de pé (item 6 e 10 do brief).
+ *
+ * Mesmo visual do checkout de comanda/mesa ([com.nokta.pos.ui.checkout.CheckoutScreen])
+ * para consistência entre os dois fluxos de pagamento do app — "Editar
+ * pedido" aqui só volta ao carrinho (`onBack` já chama `BalcaoViewModel.backToCart`,
+ * que devolve ao cardápio com o carrinho intacto, editável via +/-/remover).
  */
 @Composable
 fun BalcaoPagamentoScreen(
@@ -39,170 +70,290 @@ fun BalcaoPagamentoScreen(
     onBack: () -> Unit,
     onDismissError: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            PosTopBar(
-                title = "Pagamento",
-                subtitle = "Total ${state.total.formatBRL()}",
-                onBack = if (state.isProcessing) null else onBack,
-            )
-        },
-        bottomBar = {
-            Surface(shadowElevation = 8.dp) {
-                Column(Modifier.padding(20.dp)) {
-                    state.changeDue?.let { change ->
-                        MoneyRow("Troco", change, emphasized = true, positive = true)
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    PosPrimaryButton(
-                        text = when {
-                            state.isProcessing -> state.statusMessage ?: "Processando…"
-                            // Cartão já aprovado e registro pendente: o texto
-                            // deixa claro que isto NÃO cobra de novo.
-                            state.awaitingRegistrationRetry -> "Tentar salvar de novo"
-                            state.selectedMethod == PosPaymentOption.CASH -> "Confirmar recebimento"
-                            else -> "Cobrar ${state.total.formatBRL()}"
-                        },
-                        loading = state.isProcessing,
-                        enabled = state.canConfirmCash,
-                        onClick = onConfirm,
-                    )
+    Column(Modifier.fillMaxSize().background(NoktaSurface).verticalScroll(rememberScrollState())) {
+
+        TopBar(onBack = if (state.isProcessing) null else onBack)
+
+        Column(
+            Modifier.fillMaxWidth().background(PageGray).padding(horizontal = Dim.ScreenPad).padding(top = 8.dp, bottom = 18.dp),
+        ) {
+            Row(Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text("Pagamento", fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = NoktaInk)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Balcão", fontSize = 13.sp, color = NoktaMuted)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Total", fontSize = 12.5.sp, color = NoktaMuted)
+                    Spacer(Modifier.height(2.dp))
+                    Text(state.total.formatBRL(), fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = NoktaInk)
                 }
             }
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-        ) {
+
+            Spacer(Modifier.height(16.dp))
+
+            OrderSummaryCard(lines = state.cart.lines, total = state.total, onEditOrder = onBack)
+        }
+
+        Column(Modifier.padding(horizontal = Dim.ScreenPad)) {
+
             state.errorMessage?.let { message ->
+                Spacer(Modifier.height(Dim.SectionGap))
                 PosInlineWarning(message, tone = PosBadgeTone.DANGER)
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = onDismissError) { Text("Entendi") }
-                Spacer(Modifier.height(12.dp))
             }
 
-            Text("Forma de pagamento", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Dim.SectionGap))
+            SectionLabel("Forma de pagamento")
+            Spacer(Modifier.height(10.dp))
 
-            val methods = listOf(
-                Triple(PosPaymentOption.CREDIT_CARD, "Crédito", Icons.Filled.CreditCard),
-                Triple(PosPaymentOption.DEBIT_CARD, "Débito", Icons.Filled.CreditCard),
-                Triple(PosPaymentOption.PIX, "Pix", Icons.Filled.Pix),
-                Triple(PosPaymentOption.CASH, "Dinheiro", Icons.Filled.Payments),
-            )
-
-            methods.chunked(2).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { (option, label, icon) ->
-                        MethodTile(
-                            label = label,
-                            icon = icon,
-                            selected = state.selectedMethod == option,
-                            enabled = !state.isProcessing,
-                            onClick = { onSelectMethod(option) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PosPaymentOption.entries.forEach { method ->
+                    MethodCard(
+                        method = method,
+                        selected = method == state.selectedMethod,
+                        enabled = !state.isProcessing,
+                        onClick = { onSelectMethod(method) },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                Spacer(Modifier.height(12.dp))
             }
 
             if (state.selectedMethod == PosPaymentOption.CREDIT_CARD) {
-                Spacer(Modifier.height(8.dp))
-                Text("Parcelas", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(Dim.SectionGap))
+                SectionLabel("Parcelas")
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(1, 2, 3, 4).forEach { n ->
-                        FilterChip(
+                        AmountChip(
+                            label = if (n == 1) "À vista" else "${n}x",
                             selected = state.installments == n,
                             onClick = { onSetInstallments(n) },
-                            label = { Text(if (n == 1) "À vista" else "${n}x") },
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
             }
 
             if (state.selectedMethod == PosPaymentOption.CASH) {
-                Spacer(Modifier.height(16.dp))
-                CashReceivedSection(
-                    total = state.total,
-                    receivedCents = state.receivedCents,
-                    onSetReceived = onSetReceived,
-                )
+                Spacer(Modifier.height(Dim.SectionGap))
+                SectionLabel("Valor recebido")
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    AmountChip(label = "Exato", selected = state.receivedCents == null, onClick = { onSetReceived(null) }, modifier = Modifier.weight(1f))
+                    cashSuggestions(state.total).forEach { cents ->
+                        AmountChip(
+                            label = Money(cents).formatBRL().removePrefix("R$ "),
+                            selected = state.receivedCents == cents,
+                            onClick = { onSetReceived(cents) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                state.changeDue?.let { change ->
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Troco", fontSize = 13.sp, color = NoktaMuted)
+                        Text(change.formatBRL(), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NoktaPurple)
+                    }
+                }
             }
+
+            Spacer(Modifier.height(Dim.SectionGap))
+
+            ConfirmButton(
+                text = when {
+                    state.awaitingRegistrationRetry -> "Tentar salvar de novo"
+                    state.selectedMethod == PosPaymentOption.CASH -> "Confirmar recebimento"
+                    else -> "Cobrar ${state.total.formatBRL()}"
+                },
+                enabled = state.canConfirmCash,
+                loading = state.isProcessing,
+                onClick = onConfirm,
+            )
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun MethodTile(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val border = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-    Column(
-        modifier = modifier
-            .heightIn(min = 92.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
-            )
-            .border(if (selected) 2.dp else 1.5.dp, border, MaterialTheme.shapes.medium)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+private fun TopBar(onBack: (() -> Unit)?) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(NoktaSurface).padding(start = 10.dp, end = Dim.ScreenPad, top = 8.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(28.dp),
-            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(label, style = MaterialTheme.typography.titleMedium)
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).let { if (onBack != null) it.clickable(onClick = onBack) else it },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (onBack != null) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = NoktaInk, modifier = Modifier.size(22.dp))
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("NOKTA", fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp, color = NoktaInk)
     }
 }
 
-/**
- * Valor recebido em dinheiro. Atalhos com as notas mais comuns evitam digitar
- * — o troco aparece sozinho, o operador nunca faz a conta (item 12).
- */
 @Composable
-private fun CashReceivedSection(
-    total: Money,
-    receivedCents: Long?,
-    onSetReceived: (Long?) -> Unit,
-) {
-    Text("Valor recebido", style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(8.dp))
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(text = text, modifier = modifier, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp, color = NoktaInk)
+}
 
-    val suggestions = remember(total) { cashSuggestions(total) }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(
-            selected = receivedCents == null,
-            onClick = { onSetReceived(null) },
-            label = { Text("Exato") },
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-        )
-        suggestions.forEach { cents ->
-            FilterChip(
-                selected = receivedCents == cents,
-                onClick = { onSetReceived(cents) },
-                label = { Text(Money(cents).formatBRL().removePrefix("R$ ")) },
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            )
+@Composable
+private fun OrderSummaryCard(lines: List<CartLine>, total: Money, onEditOrder: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(Dim.CardRadius)).background(NoktaSurface).border(1.dp, NoktaBorder, RoundedCornerShape(Dim.CardRadius)),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp)) {
+            Spacer(Modifier.height(14.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Resumo do pedido", modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+                Row(
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onEditOrder).padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Editar pedido", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NoktaPurple)
+                    Spacer(Modifier.width(5.dp))
+                    Icon(Icons.Outlined.Edit, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(14.dp))
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            if (lines.isEmpty()) {
+                Text("Nenhum item no carrinho.", fontSize = 13.sp, color = NoktaMutedSoft, modifier = Modifier.padding(vertical = 8.dp))
+            } else {
+                lines.forEach { line ->
+                    OrderItemRow(line)
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Box(Modifier.fillMaxWidth().height(1.dp).background(NoktaBorder))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().background(PageGray).padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Total", modifier = Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+            Text(total.formatBRL(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NoktaPurple)
+        }
+    }
+}
+
+@Composable
+private fun OrderItemRow(line: CartLine) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(PageGray),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("${line.quantity}x", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
+        }
+
+        Spacer(Modifier.width(11.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(line.productName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk)
+            val detail = buildList {
+                if (line.variantName.isNotBlank()) add(line.variantName)
+                if (line.modifiers.isNotEmpty()) add(line.modifiers.joinToString(", ") { it.name })
+                line.notes?.takeIf { it.isNotBlank() }?.let { add("Obs.: $it") }
+            }.joinToString(" · ")
+            if (detail.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(detail, fontSize = 11.5.sp, color = NoktaMutedSoft, maxLines = 1)
+            }
+        }
+
+        Spacer(Modifier.width(8.dp))
+        Text(line.lineTotal.formatBRL(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+    }
+}
+
+@Composable
+private fun AmountChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) NoktaPurpleBright else NoktaSurface)
+            .border(1.dp, if (selected) NoktaPurpleBright else FieldBorder, RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) Color.White else NoktaInkSoft, textAlign = TextAlign.Center, maxLines = 1)
+    }
+}
+
+@Composable
+private fun MethodCard(method: PosPaymentOption, selected: Boolean, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(82.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (selected) SelectedTint else NoktaSurface)
+                .border(width = if (selected) 1.5.dp else 1.dp, color = if (selected) NoktaPurpleBright else FieldBorder, shape = RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled, onClick = onClick),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(method.icon(), contentDescription = null, tint = if (selected) NoktaPurple else NoktaInkSoft, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(10.dp))
+            Text(method.label(), fontSize = 12.5.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) NoktaInk else NoktaInkSoft, maxLines = 1)
+        }
+
+        if (selected) {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).size(20.dp).clip(CircleShape).background(NoktaPurple),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Check, contentDescription = "Selecionado", tint = Color.White, modifier = Modifier.size(12.dp))
+            }
+        }
+    }
+}
+
+private fun PosPaymentOption.icon(): ImageVector = when (this) {
+    PosPaymentOption.CREDIT_CARD -> Icons.Filled.CreditCard
+    PosPaymentOption.DEBIT_CARD -> Icons.Filled.CreditCard
+    PosPaymentOption.PIX -> Icons.Filled.Pix
+    PosPaymentOption.CASH -> Icons.Filled.Payments
+}
+
+private fun PosPaymentOption.label(): String = when (this) {
+    PosPaymentOption.CREDIT_CARD -> "Crédito"
+    PosPaymentOption.DEBIT_CARD -> "Débito"
+    PosPaymentOption.PIX -> "Pix"
+    PosPaymentOption.CASH -> "Dinheiro"
+}
+
+@Composable
+private fun ConfirmButton(text: String, enabled: Boolean, loading: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (enabled) NoktaPurpleBright else FieldBorder)
+            .clickable(enabled = enabled && !loading, onClick = onClick)
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+        } else {
+            Text(text, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp, color = if (enabled) Color.White else NoktaMutedSoft, textAlign = TextAlign.Center)
         }
     }
 }

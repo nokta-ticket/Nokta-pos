@@ -46,6 +46,8 @@ data class TabResponse(
     val subtotalCents: Long,
     val discountCents: Long,
     val serviceChargeCents: Long,
+    /** Base 10000 = 100% — vem direto do Prisma (VenueTab.serviceChargeRateBps), só para exibição. */
+    val serviceChargeRateBps: Int = 0,
     val totalCents: Long,
     val paidCents: Long,
     val remainingCents: Long,
