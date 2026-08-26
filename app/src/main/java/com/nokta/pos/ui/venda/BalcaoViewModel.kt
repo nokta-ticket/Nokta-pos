@@ -9,6 +9,7 @@ import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabType
 import com.nokta.pos.common.Money
+import com.nokta.pos.network.humanizedApiMessage
 import com.nokta.pos.payment.domain.PaymentProvider
 import com.nokta.pos.payment.domain.PaymentRequest
 import com.nokta.pos.payment.domain.PaymentResult
@@ -55,7 +56,13 @@ data class BalcaoUiState(
     val splitPeople: Int? = null,
     /** Quantas partes já foram cobradas com sucesso nesta venda. */
     val paidParts: Int = 0,
+    /** Modo de edição inline do resumo do pedido (+/−/remover por item). */
+    val isEditingCart: Boolean = false,
+    /** Linha do carrinho aguardando confirmação de remoção. */
+    val pendingRemoveLine: com.nokta.pos.cart.CartLine? = null,
 ) {
+    /** Editar o carrinho depois que algo já foi cobrado mudaria o total sob partes já pagas — nunca permitido. */
+    val canEditCart: Boolean get() = paidParts == 0 && !awaitingRegistrationRetry
     val total: Money get() = cart.total
 
     /** Quanto ainda falta cobrar — total na primeira cobrança, ou o que sobrou depois de partes já pagas. */
@@ -177,6 +184,46 @@ class BalcaoViewModel @Inject constructor(
         _state.value = _state.value.copy(stage = BalcaoStage.CART, errorMessage = null, statusMessage = null)
     }
 
+    fun toggleEditCart() {
+        if (!_state.value.canEditCart) return
+        _state.value = _state.value.copy(isEditingCart = !_state.value.isEditingCart)
+    }
+
+    /** "+": mais 1 unidade da mesma linha — carrinho puramente local, nunca precisa de rede/servidor. */
+    fun increaseCartLine(line: com.nokta.pos.cart.CartLine) {
+        if (!_state.value.canEditCart) return
+        _state.value = _state.value.copy(cart = _state.value.cart.updateQuantity(line.localId, line.quantity + 1))
+    }
+
+    /**
+     * "−": com quantidade > 1, diminui 1 unidade direto. Com quantidade 1,
+     * pede confirmação antes de remover a linha por completo (mesmo padrão
+     * do checkout de comanda) — mesmo sendo só carrinho local, sumir sem
+     * avisar surpreende o operador no meio de montar o pedido.
+     */
+    fun decreaseCartLine(line: com.nokta.pos.cart.CartLine) {
+        if (!_state.value.canEditCart) return
+        if (line.quantity <= 1) {
+            _state.value = _state.value.copy(pendingRemoveLine = line)
+            return
+        }
+        _state.value = _state.value.copy(cart = _state.value.cart.updateQuantity(line.localId, line.quantity - 1))
+    }
+
+    fun requestRemoveCartLine(line: com.nokta.pos.cart.CartLine) {
+        if (!_state.value.canEditCart) return
+        _state.value = _state.value.copy(pendingRemoveLine = line)
+    }
+
+    fun dismissRemoveCartLine() {
+        _state.value = _state.value.copy(pendingRemoveLine = null)
+    }
+
+    fun confirmRemoveCartLine() {
+        val line = _state.value.pendingRemoveLine ?: return
+        _state.value = _state.value.copy(cart = _state.value.cart.remove(line.localId), pendingRemoveLine = null)
+    }
+
     fun selectMethod(method: PosPaymentOption) {
         _state.value = _state.value.copy(
             selectedMethod = method,
@@ -235,11 +282,9 @@ class BalcaoViewModel @Inject constructor(
 
         viewModelScope.launch {
             when (current.selectedMethod) {
-                PosPaymentOption.CASH, PosPaymentOption.PIX -> {
-                    // Sem intermediário financeiro: registra direto. PIX aqui é
-                    // o PIX conferido fora do terminal (QR do estabelecimento);
-                    // a Nokta não confirma liquidação, só registra o que o
-                    // operador declara ter recebido.
+                PosPaymentOption.CASH -> {
+                    // Sem intermediário financeiro: registra direto o que o
+                    // operador declara ter recebido em espécie.
                     finalizeSale(
                         organizationId = organizationId,
                         locationId = locationId,
@@ -249,25 +294,32 @@ class BalcaoViewModel @Inject constructor(
                         externalReference = null,
                     )
                 }
-                PosPaymentOption.DEBIT_CARD, PosPaymentOption.CREDIT_CARD -> {
-                    chargeCardThenFinalize(organizationId, locationId, current)
+                // PIX passa pelo mesmo deep link da Cielo Smart que
+                // débito/crédito — é o PIX cobrado dentro do terminal
+                // (QR gerado pela própria Cielo), com confirmação real da
+                // adquirente antes de registrar a venda. Nunca o "PIX
+                // declarado" de fora do terminal.
+                PosPaymentOption.PIX, PosPaymentOption.DEBIT_CARD, PosPaymentOption.CREDIT_CARD -> {
+                    chargeViaCieloThenFinalize(organizationId, locationId, current)
                 }
             }
         }
     }
 
-    private suspend fun chargeCardThenFinalize(
+    private suspend fun chargeViaCieloThenFinalize(
         organizationId: Long,
         locationId: Long,
         current: BalcaoUiState,
     ) {
-        val method = if (current.selectedMethod == PosPaymentOption.DEBIT_CARD) {
-            PosPaymentMethod.DEBIT_CARD
-        } else {
-            PosPaymentMethod.CREDIT_CARD
+        val method = when (current.selectedMethod) {
+            PosPaymentOption.DEBIT_CARD -> PosPaymentMethod.DEBIT_CARD
+            PosPaymentOption.PIX -> PosPaymentMethod.PIX
+            else -> PosPaymentMethod.CREDIT_CARD
         }
 
-        _state.value = _state.value.copy(statusMessage = "Aguardando o cartão…")
+        _state.value = _state.value.copy(
+            statusMessage = if (method == PosPaymentMethod.PIX) "Aguardando o Pix…" else "Aguardando o cartão…",
+        )
 
         // tabId 0: no balcão a comanda ainda nem existe quando cobramos (ou,
         // se já existe de uma tentativa anterior, ainda não tem confirmação
@@ -423,9 +475,9 @@ class BalcaoViewModel @Inject constructor(
                 statusMessage = null,
                 awaitingRegistrationRetry = externalReference != null,
                 errorMessage = if (externalReference != null) {
-                    "Cartão aprovado, mas falhou ao salvar no sistema (${e.message}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
+                    "Cartão aprovado, mas falhou ao salvar no sistema (${e.humanizedApiMessage()}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
                 } else {
-                    humanizeError(e.message)
+                    humanizeError(e.humanizedApiMessage())
                 },
             )
         }

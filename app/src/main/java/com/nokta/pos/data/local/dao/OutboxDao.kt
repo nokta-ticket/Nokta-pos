@@ -33,4 +33,15 @@ interface OutboxDao {
 
     @Query("UPDATE outbox SET status = :status WHERE sequence = :sequence")
     suspend fun setStatus(sequence: Long, status: OutboxStatus)
+
+    /**
+     * Rejeita em cascata toda operação ainda pendente da mesma comanda — usado
+     * quando o `CREATE_TAB` dela é recusado pelo servidor: sem a comanda
+     * existir no backend, `SEND_ORDER`/`REGISTER_PAYMENT` da mesma
+     * `tabLocalId` nunca teriam como ser aceitos, e ficariam retentando para
+     * sempre em vez de aparecer como a falha real que são (ver
+     * [com.nokta.pos.sync.SyncEngine]).
+     */
+    @Query("UPDATE outbox SET status = 'REJECTED', lastError = :reason WHERE tabLocalId = :tabLocalId AND status != 'REJECTED'")
+    suspend fun rejectAllForTab(tabLocalId: String, reason: String)
 }

@@ -137,7 +137,20 @@ class TabRepository @Inject constructor(
     suspend fun searchOpenTabs(organizationId: Long, locationId: Long, search: String? = null, type: TabType? = null): List<Tab> {
         try {
             val response = api.listTabs(organizationId, locationId, status = TabStatus.OPEN.name, type = type?.name, search = search?.trim()?.takeIf { it.isNotEmpty() })
-            val entities = response.map { it.toEntity() }
+            // toEntity() devolve localId="" de propósito — aqui é o "caller"
+            // que o comentário da função promete: reaproveita o localId já
+            // conhecido desta comanda (por serverId) para não perder o
+            // vínculo com itens/pagamentos já gravados localmente, e só gera
+            // um novo UUID na primeira vez que este dispositivo a vê. Sem
+            // isso, toda comanda vinda só da busca ficava com localId vazio
+            // e travava ao abrir (rota "comanda/" sem argumento).
+            val entities = response.map { dto ->
+                // Não usar ?: puro aqui: um registro corrompido de antes desta
+                // correção (esta era exatamente a causa raiz do bug) tem
+                // localId="" salvo, que não é null e passaria direto.
+                val existingLocalId = tabDao.getTabByServerId(dto.id)?.localId?.takeIf { it.isNotBlank() }
+                dto.toEntity().copy(localId = existingLocalId ?: UUID.randomUUID().toString())
+            }
             tabDao.refreshOpenTabsSnapshot(organizationId, locationId, entities)
         } catch (_: IOException) {
             // Sem rede: segue só com o que o Room já tem.
@@ -150,12 +163,33 @@ class TabRepository @Inject constructor(
     suspend fun listRecentClosedTabs(organizationId: Long, locationId: Long, limit: Int = 20): List<Tab> {
         try {
             val response = api.listTabs(organizationId, locationId, status = TabStatus.CLOSED.name).take(limit)
-            tabDao.upsertClosedTabsSnapshot(response.map { it.toEntity() })
+            // Mesmo motivo do localId em searchOpenTabs acima: toEntity()
+            // nunca preenche localId sozinho.
+            val entities = response.map { dto ->
+                // Não usar ?: puro aqui: um registro corrompido de antes desta
+                // correção (esta era exatamente a causa raiz do bug) tem
+                // localId="" salvo, que não é null e passaria direto.
+                val existingLocalId = tabDao.getTabByServerId(dto.id)?.localId?.takeIf { it.isNotBlank() }
+                dto.toEntity().copy(localId = existingLocalId ?: UUID.randomUUID().toString())
+            }
+            tabDao.upsertClosedTabsSnapshot(entities)
         } catch (_: IOException) {
             // Segue com o histórico local.
         }
         return tabDao.getRecentClosedTabsLocal(organizationId, locationId, limit).map { it.toDomainShallow() }
     }
+
+    /**
+     * Se há caixa aberto na unidade agora. Sem cache local de propósito — é
+     * um estado que muda a qualquer momento (o gerente pode fechar o caixa
+     * no meio do turno) e a única ação que depende disso (cobrar) já revalida
+     * contra o servidor de qualquer forma; um valor "aberto" salvo offline
+     * seria enganoso assim que a rede caísse. `null` = não foi possível
+     * consultar agora (sem rede, ou erro) — a Home trata isso como "não avisa
+     * nada", nunca como "está aberto" nem "está fechado".
+     */
+    suspend fun isCashOpen(organizationId: Long, locationId: Long): Boolean? =
+        runCatching { api.getCashStatus(organizationId, locationId).isOpen }.getOrNull()
 
     /** Mesas: cache read-through — mostra o último dado conhecido com aviso de idade se offline. */
     fun observeTables(organizationId: Long, locationId: Long): Flow<List<VenueTable>> =
@@ -371,6 +405,45 @@ class TabRepository @Inject constructor(
         }
     }
 
+    /**
+     * Lança mais 1 unidade do mesmo produto/variante como um pedido novo —
+     * nunca "soma" na linha existente (o backend não tem operação de somar
+     * quantidade numa linha já lançada). Reaproveita o mesmo caminho de
+     * [submitOrder] usado pelo cardápio, então entra no Outbox normalmente
+     * se estiver offline.
+     */
+    suspend fun increaseItemQuantity(organizationId: Long, item: com.nokta.pos.comanda.domain.TabItem) {
+        val tabLocalId = tabDao.getItemByLocalId(item.localId)?.tabLocalId ?: return
+        submitOrder(
+            organizationId = organizationId,
+            tabLocalId = tabLocalId,
+            lines = listOf(OrderLine(menuItemId = item.menuItemId, variantId = item.variantId, quantity = 1, notes = item.notes)),
+        )
+    }
+
+    /**
+     * Diminui 1 unidade de uma linha já lançada. Não existe "editar
+     * quantidade" no backend — a única forma de reduzir é CANCELAR a linha
+     * inteira (auditoria exige motivo) e, se sobrar quantidade, relançar um
+     * pedido novo com `quantity - 1`. Do ponto de vista do operador é só o
+     * número descendo; por baixo fica um cancelamento + um novo lançamento.
+     */
+    suspend fun decreaseItemQuantity(organizationId: Long, item: com.nokta.pos.comanda.domain.TabItem): CancelItemOutcome {
+        val entity = tabDao.getItemByLocalId(item.localId) ?: return CancelItemOutcome.NotFound
+        val outcome = cancelItem(organizationId, item.localId, reason = "Ajuste de quantidade pelo operador")
+        if (outcome != CancelItemOutcome.Success && outcome != CancelItemOutcome.RemovedLocalDraft) return outcome
+
+        val remaining = item.quantity - 1
+        if (remaining > 0) {
+            submitOrder(
+                organizationId = organizationId,
+                tabLocalId = entity.tabLocalId,
+                lines = listOf(OrderLine(menuItemId = item.menuItemId, variantId = item.variantId, quantity = remaining, notes = item.notes)),
+            )
+        }
+        return outcome
+    }
+
     suspend fun closeTab(organizationId: Long, tabLocalId: String): Tab {
         val serverId = tabDao.getTabByLocalId(tabLocalId)?.serverId
             ?: throw IllegalStateException("Comanda ainda não sincronizada — aguarde a conexão para fechar.")
@@ -551,6 +624,7 @@ private fun TabItemEntity.toDomain(): TabItem {
         .map { TabItemModifier(name = it.name, quantity = it.quantity, total = Money(it.totalCents)) }
     return TabItem(
         localId = localId, serverId = serverId, orderId = null,
+        menuItemId = menuItemId, variantId = variantId,
         productName = productName, variantName = variantName, quantity = quantity,
         unitPrice = Money(unitPriceCents), modifiersTotal = Money(modifiersTotalCents), lineTotal = Money(lineTotalCents),
         status = com.nokta.pos.comanda.domain.OrderItemStatus.parse(status), notes = notes, modifiers = modifiers,

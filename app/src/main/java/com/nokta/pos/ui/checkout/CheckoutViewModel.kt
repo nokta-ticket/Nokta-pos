@@ -4,9 +4,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
+import com.nokta.pos.comanda.data.CancelItemOutcome
 import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
+import com.nokta.pos.comanda.domain.TabItem
 import com.nokta.pos.common.Money
+import com.nokta.pos.network.humanizedApiMessage
 import com.nokta.pos.payment.domain.PartialValidation
 import com.nokta.pos.payment.domain.PaymentProvider
 import com.nokta.pos.payment.domain.PaymentRequest
@@ -26,7 +29,6 @@ enum class PaymentUiMethod { CASH, PIX, DEBIT_CARD, CREDIT_CARD }
 enum class AmountMode {
     FULL,      // tudo que falta
     SPLIT,     // dividir o restante entre N pessoas, cobrar 1 parte
-    CUSTOM,    // valor digitado
 }
 
 data class CheckoutUiState(
@@ -37,13 +39,16 @@ data class CheckoutUiState(
     val installments: Int = 1,
     val amountMode: AmountMode = AmountMode.FULL,
     val splitPeople: Int = 2,
-    val customAmountCents: Long = 0,
     val receivedCents: Long? = null,
     val isProcessingPayment: Boolean = false,
     val paymentMessage: String? = null,
     val tabClosed: Boolean = false,
     /** Cobrança aprovada no cartão mas ainda não registrada — permite retry seguro. */
     val pendingRegistration: PendingRegistration? = null,
+    /** Modo de edição inline do resumo do pedido (+/−/remover por item). */
+    val isEditingOrder: Boolean = false,
+    /** Item aguardando confirmação de remoção (quantidade chegando a 0, ou lixeira). */
+    val pendingRemoveItem: TabItem? = null,
 ) {
     /** Valor que será cobrado nesta operação. */
     val amountToCharge: Money
@@ -52,7 +57,6 @@ data class CheckoutUiState(
             return when (amountMode) {
                 AmountMode.FULL -> remaining
                 AmountMode.SPLIT -> SplitCalculator.splitRemaining(remaining, splitPeople).firstOrNull() ?: Money.ZERO
-                AmountMode.CUSTOM -> Money(customAmountCents)
             }
         }
 
@@ -118,11 +122,7 @@ class CheckoutViewModel @Inject constructor(
         viewModelScope.launch {
             tabRepository.observeTab(tabLocalId).collect { tab ->
                 if (tab != null) {
-                    _state.value = _state.value.copy(
-                        tab = tab,
-                        isLoading = false,
-                        customAmountCents = if (_state.value.customAmountCents == 0L) tab.remaining.cents else _state.value.customAmountCents,
-                    )
+                    _state.value = _state.value.copy(tab = tab, isLoading = false)
                 }
             }
         }
@@ -135,7 +135,7 @@ class CheckoutViewModel @Inject constructor(
             runCatching { tabRepository.getTab(organizationId, tabLocalId) }
                 .onFailure { e ->
                     if (_state.value.tab == null) {
-                        _state.value = _state.value.copy(isLoading = false, error = e.message ?: "Erro ao carregar comanda.")
+                        _state.value = _state.value.copy(isLoading = false, error = e.humanizedApiMessage("Erro ao carregar comanda."))
                     } else {
                         _state.value = _state.value.copy(isLoading = false)
                     }
@@ -152,26 +152,70 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun setAmountMode(mode: AmountMode) {
-        _state.value = _state.value.copy(
-            amountMode = mode,
-            receivedCents = null,
-            customAmountCents = if (mode == AmountMode.CUSTOM && _state.value.customAmountCents == 0L) {
-                _state.value.tab?.remaining?.cents ?: 0L
-            } else _state.value.customAmountCents,
-        )
+        _state.value = _state.value.copy(amountMode = mode, receivedCents = null)
     }
 
     fun setSplitPeople(people: Int) {
         _state.value = _state.value.copy(splitPeople = people.coerceIn(2, 20), receivedCents = null)
     }
 
-    fun setCustomAmount(cents: Long) {
-        _state.value = _state.value.copy(customAmountCents = cents.coerceAtLeast(0), receivedCents = null)
-    }
-
     fun setReceived(cents: Long?) { _state.value = _state.value.copy(receivedCents = cents) }
 
     fun clearMessage() { _state.value = _state.value.copy(paymentMessage = null) }
+
+    fun toggleEditOrder() {
+        if (_state.value.isProcessingPayment) return
+        _state.value = _state.value.copy(isEditingOrder = !_state.value.isEditingOrder)
+    }
+
+    /** "+": lança mais 1 unidade do mesmo item como pedido novo. */
+    fun increaseItem(item: TabItem) {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        viewModelScope.launch {
+            runCatching { tabRepository.increaseItemQuantity(organizationId, item) }
+                .onFailure { e -> _state.value = _state.value.copy(paymentMessage = e.humanizedApiMessage("Não foi possível adicionar o item.")) }
+        }
+    }
+
+    /**
+     * "−": com quantidade > 1, diminui 1 unidade direto (sem confirmação —
+     * ainda sobra pelo menos 1). Com quantidade 1, pede confirmação antes de
+     * remover o item por completo (ver [confirmRemoveItem]/[dismissRemoveItem]).
+     */
+    fun decreaseItem(item: TabItem) {
+        if (item.quantity <= 1) {
+            _state.value = _state.value.copy(pendingRemoveItem = item)
+            return
+        }
+        applyDecrease(item)
+    }
+
+    /** Lixeira: sempre pede confirmação, independente da quantidade. */
+    fun requestRemoveItem(item: TabItem) {
+        _state.value = _state.value.copy(pendingRemoveItem = item)
+    }
+
+    fun dismissRemoveItem() {
+        _state.value = _state.value.copy(pendingRemoveItem = null)
+    }
+
+    fun confirmRemoveItem() {
+        val item = _state.value.pendingRemoveItem ?: return
+        _state.value = _state.value.copy(pendingRemoveItem = null)
+        applyDecrease(item)
+    }
+
+    private fun applyDecrease(item: TabItem) {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        viewModelScope.launch {
+            val outcome = tabRepository.decreaseItemQuantity(organizationId, item)
+            if (outcome == CancelItemOutcome.OfflineNotSupported) {
+                _state.value = _state.value.copy(paymentMessage = "Sem conexão: não é possível remover item já confirmado no servidor agora. Tente de novo com internet.")
+            } else if (outcome == CancelItemOutcome.NotFound) {
+                _state.value = _state.value.copy(paymentMessage = "Item não encontrado — pode já ter sido removido.")
+            }
+        }
+    }
 
     fun charge() {
         val tab = _state.value.tab ?: return
@@ -189,22 +233,21 @@ class CheckoutViewModel @Inject constructor(
                     externalReference = null,
                     attemptId = UUID.randomUUID().toString(),
                 )
-                PaymentUiMethod.PIX -> register(
-                    organizationId, tab, "PIX", amount,
-                    receivedCents = null,
-                    externalReference = null,
-                    attemptId = UUID.randomUUID().toString(),
-                )
-                PaymentUiMethod.DEBIT_CARD, PaymentUiMethod.CREDIT_CARD -> chargeCard(organizationId, tab, amount)
+                // PIX passa pelo mesmo deep link da Cielo Smart que
+                // débito/crédito — é o PIX cobrado dentro do terminal (QR
+                // gerado pela própria Cielo), com confirmação real da
+                // adquirente antes de registrar o pagamento na comanda.
+                PaymentUiMethod.PIX, PaymentUiMethod.DEBIT_CARD, PaymentUiMethod.CREDIT_CARD ->
+                    chargeViaCielo(organizationId, tab, amount)
             }
         }
     }
 
-    private suspend fun chargeCard(organizationId: Long, tab: Tab, amount: Money) {
-        val method = if (_state.value.selectedMethod == PaymentUiMethod.DEBIT_CARD) {
-            PosPaymentMethod.DEBIT_CARD
-        } else {
-            PosPaymentMethod.CREDIT_CARD
+    private suspend fun chargeViaCielo(organizationId: Long, tab: Tab, amount: Money) {
+        val method = when (_state.value.selectedMethod) {
+            PaymentUiMethod.DEBIT_CARD -> PosPaymentMethod.DEBIT_CARD
+            PaymentUiMethod.PIX -> PosPaymentMethod.PIX
+            else -> PosPaymentMethod.CREDIT_CARD
         }
 
         val result = paymentProvider.startPayment(
@@ -293,9 +336,9 @@ class CheckoutViewModel @Inject constructor(
                     PendingRegistration(attemptId, amount, method, externalReference)
                 } else null,
                 paymentMessage = if (approvedOnCard) {
-                    "Cartão aprovado, mas falhou ao salvar (${e.message}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
+                    "Cartão aprovado, mas falhou ao salvar (${e.humanizedApiMessage()}). Toque em 'Tentar salvar de novo' — o cliente não será cobrado outra vez."
                 } else {
-                    humanizeError(e.message)
+                    humanizeError(e.humanizedApiMessage())
                 },
             )
         }

@@ -1,5 +1,6 @@
 package com.nokta.pos.auth
 
+import android.os.SystemClock
 import com.nokta.pos.access.OperatorAccess
 import com.nokta.pos.device.DeviceCredentialsStore
 import com.nokta.pos.network.NoktaApi
@@ -7,6 +8,18 @@ import com.nokta.pos.network.dto.DeviceLoginRequest
 import com.nokta.pos.network.dto.RedeemPairingCodeRequest
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Instante (epoch millis) em que o kernel atual deu boot — constante durante
+ * toda a vida do processo/kernel, e só muda quando o aparelho reinicia de
+ * verdade. `elapsedRealtime()` é "tempo desde o boot", então subtraí-lo do
+ * relógio de parede dá sempre o mesmo valor entre fechar/reabrir o app
+ * (mesmo boot) e um valor diferente depois de um reboot real.
+ */
+private fun currentBootInstant(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+
+/** Ver [AuthRepository.isSessionExpired]. */
+private const val BOOT_INSTANT_TOLERANCE_MS = 60_000L
 
 /**
  * `sessionExpiresAt` chega como ISO-8601 do backend. Convertido para epoch
@@ -70,6 +83,7 @@ class AuthRepository @Inject constructor(
             locationName = response.location.nome,
             sessionExpiresAtEpochMs = parseIsoToEpochMillis(response.sessionExpiresAt),
         )
+        credentialsStore.saveSessionBootInstant(currentBootInstant())
 
         // Cardápio principal resolvido pelo backend — nunca mais um menuId fixo no cliente.
         response.mainMenu?.let { credentialsStore.saveMainMenuId(it.id) }
@@ -133,10 +147,43 @@ class AuthRepository @Inject constructor(
     fun operationMode(): String? = credentialsStore.operationMode()
     fun requiresOpenCashSessionForPayments(): Boolean = credentialsStore.requiresOpenCashSessionForPayments()
 
-    /** Sessão expirada segundo o relógio local — checagem barata antes de bater na rede. */
+    /**
+     * Sessão vencida de verdade segundo o relógio local — o JWT não tem mais
+     * nenhuma garantia de validade, com ou sem rede. Checagem barata antes de
+     * bater na rede; o backend continua sendo quem barra de fato via 401.
+     */
     fun isSessionExpired(): Boolean {
         val expiresAt = credentialsStore.sessionExpiresAt() ?: return false
         return System.currentTimeMillis() >= expiresAt
+    }
+
+    /**
+     * O aparelho reiniciou desde o último login/confirmação — a sessão em si
+     * ainda pode ser válida (JWT não vencido), mas não temos mais certeza de
+     * QUEM está com a maquininha na mão.
+     *
+     * Reiniciar a máquina costuma ser exatamente o momento em que ela troca
+     * de dono (fim de turno, entrega pro próximo operador). Fechar/reabrir o
+     * app sem reiniciar o aparelho é o mesmo boot e nunca cai aqui.
+     *
+     * Isto é deliberadamente separado de [isSessionExpired]: com rede
+     * disponível, reboot sempre exige reconfirmar quem é o operador (mesmo
+     * a sessão sendo válida); sem rede, [SplashViewModel] decide reaproveitar
+     * a sessão em vez de travar o caixa por falta de internet no exato
+     * momento do boot.
+     */
+    fun didRebootSinceLastSession(): Boolean {
+        val sessionBootInstant = credentialsStore.sessionBootInstant() ?: return false
+        // Comparação com folga: o relógio de parede pode ajustar por NTP
+        // entre boots, então um recálculo exato de `currentBootInstant()`
+        // pode divergir por alguns segundos mesmo sem reboot. Só trata como
+        // reboot real uma diferença grande o suficiente para não ser isso.
+        return kotlin.math.abs(currentBootInstant() - sessionBootInstant) > BOOT_INSTANT_TOLERANCE_MS
+    }
+
+    /** Reconfirma a sessão atual após um reboot sem exigir senha de novo — grava o boot instant novo. */
+    fun confirmSessionAfterReboot() {
+        credentialsStore.saveSessionBootInstant(currentBootInstant())
     }
 
     /** Troca rápida de operador (seção 8/33 do PRD) — nunca desfaz o pareamento do terminal. */

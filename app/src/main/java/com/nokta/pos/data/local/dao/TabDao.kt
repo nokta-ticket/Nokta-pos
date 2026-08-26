@@ -151,4 +151,17 @@ interface TabDao {
 
     @Query("SELECT MAX(fetchedAtEpochMs) FROM venue_table WHERE organizationId = :organizationId AND locationId = :locationId")
     suspend fun getTablesFetchedAt(organizationId: Long, locationId: Long): Long?
+
+    /**
+     * Marca uma comanda que nunca vai conseguir sincronizar (`CREATE_TAB`
+     * recusado pelo servidor) como CANCELED — sai da contagem de "Abertas"
+     * (que só considera `status = 'OPEN'') sem apagar o registro. Reaproveita
+     * `TabStatus.CANCELED` (não um status novo tipo "FAILED"): a comanda de
+     * fato nunca existiu no servidor, e "cancelada" já é o status que a UI
+     * (filtros, `when` exaustivos) sabe tratar como "não vai a lugar nenhum".
+     * `syncState = FAILED` (nunca antes gravado) diferencia isso de um
+     * cancelamento normal para quem inspecionar o registro local depois.
+     */
+    @Query("UPDATE tab SET status = 'CANCELED', syncState = 'FAILED' WHERE localId = :localId")
+    suspend fun markTabFailed(localId: String)
 }

@@ -3,6 +3,7 @@ package com.nokta.pos.ui.splash
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
+import com.nokta.pos.sync.ConnectivityChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,8 +20,16 @@ enum class StartDestination { PAIRING, LOGIN, HOME }
  *
  * Regras (nesta ordem):
  *  1. Terminal não pareado → PAIRING (só o gerente resolve).
- *  2. Sem operador logado, ou sessão vencida → LOGIN (pareamento intacto).
- *  3. Caso contrário → HOME.
+ *  2. Sem operador logado, ou sessão vencida de verdade (JWT expirado) →
+ *     LOGIN (pareamento intacto).
+ *  3. Aparelho reiniciou desde o login E há rede → LOGIN. Reiniciar costuma
+ *     ser o momento em que a maquininha troca de mão (fim de turno); com
+ *     rede disponível, sempre vale reconfirmar quem está com ela.
+ *  4. Aparelho reiniciou desde o login mas SEM rede → HOME, reaproveitando a
+ *     sessão. Travar o caixa porque a internet caiu no exato instante do
+ *     boot seria pior que o risco de continuar com o operador anterior por
+ *     mais um pouco — assim que a rede voltar, o próximo reboot exige login.
+ *  5. Caso contrário → HOME.
  *
  * A sessão é revalidada em background (`refreshAccess`): se o backend
  * recusar, o interceptor de 401 devolve o operador ao login sozinho. Nunca
@@ -29,6 +38,7 @@ enum class StartDestination { PAIRING, LOGIN, HOME }
 @HiltViewModel
 class SplashViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val connectivityChecker: ConnectivityChecker,
 ) : ViewModel() {
 
     private val _destination = MutableStateFlow<StartDestination?>(null)
@@ -44,7 +54,20 @@ class SplashViewModel @Inject constructor(
                 authRepository.logoutOperator()
                 StartDestination.LOGIN
             }
-            else -> StartDestination.HOME
+            authRepository.didRebootSinceLastSession() && connectivityChecker.isOnline() -> {
+                authRepository.logoutOperator()
+                StartDestination.LOGIN
+            }
+            else -> {
+                // Sem reboot pendente, ou reboot pendente mas sem rede para
+                // reconfirmar: reaproveita a sessão e marca este boot como
+                // já confirmado, para não repetir a checagem a cada abertura
+                // enquanto a rede continuar fora.
+                if (authRepository.didRebootSinceLastSession()) {
+                    authRepository.confirmSessionAfterReboot()
+                }
+                StartDestination.HOME
+            }
         }
 
         if (destination == StartDestination.HOME) {

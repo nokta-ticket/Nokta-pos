@@ -141,6 +141,17 @@ fun HomeContent(
                 )
             }
 
+            // isCashOpen == false: sabemos com certeza que está fechado — avisa
+            // cedo, antes do operador montar um pedido que não vai conseguir
+            // cobrar. null (ainda carregando, sem rede, ou consulta falhou)
+            // nunca gera aviso — um falso "fechado" pararia o garçom à toa.
+            if (state.isCashOpen == false) {
+                Spacer(Modifier.height(16.dp))
+                PosInlineWarning(
+                    "Caixa fechado nesta unidade — pagamentos serão recusados até um gerente abrir o caixa no painel (Operação › Caixa). Você ainda pode lançar pedidos normalmente.",
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
 
             NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
@@ -298,8 +309,12 @@ private fun StatusRow(state: HomeUiState) {
         // sincronizado agora").
         ConnectionState.OFFLINE -> "Sem sincronização"
         // Com fila, o risco real é desligar o terminal com venda presa nele.
+        // "Operações", não "vendas": uma única venda pode gerar várias
+        // entradas na fila (abrir comanda, lançar pedido, registrar
+        // pagamento, fechar) — contar isso como "vendas" engana o operador
+        // sobre quantas vendas de fato ficaram presas.
         ConnectionState.OFFLINE_PENDING ->
-            "$pending ${if (pending == 1) "venda não enviada" else "vendas não enviadas"}"
+            "$pending ${if (pending == 1) "operação não enviada" else "operações não enviadas"}"
     }
 
     // Só os estados que exigem atenção puxam cor no texto auxiliar; os demais

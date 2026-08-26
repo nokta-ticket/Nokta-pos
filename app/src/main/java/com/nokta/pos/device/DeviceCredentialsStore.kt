@@ -112,6 +112,19 @@ class DeviceCredentialsStore @Inject constructor(
     fun sessionExpiresAt(): Long? = prefs.getLong(KEY_SESSION_EXPIRES_AT, -1).takeIf { it != -1L }
 
     /**
+     * Marca em qual boot do aparelho a sessão atual foi criada/confirmada.
+     * `bootInstant` é constante durante a vida do kernel e muda sempre que o
+     * aparelho reinicia de verdade — diferente de fechar/reabrir o app
+     * (mesmo processo do kernel, mesmo valor), que nunca deve derrubar a
+     * sessão. Ver [AuthRepository.isSessionStaleAfterReboot].
+     */
+    fun saveSessionBootInstant(bootInstant: Long) {
+        prefs.edit().putLong(KEY_SESSION_BOOT_INSTANT, bootInstant).apply()
+    }
+
+    fun sessionBootInstant(): Long? = prefs.getLong(KEY_SESSION_BOOT_INSTANT, -1).takeIf { it != -1L }
+
+    /**
      * Sessão do operador — some no logout/expiração. NUNCA apaga o pareamento
      * do terminal nem as credenciais Cielo da unidade: trocar de operador não
      * pode exigir parear a maquininha de novo (docs/pos-mvp-architecture.md,
@@ -125,6 +138,7 @@ class DeviceCredentialsStore @Inject constructor(
             .remove(KEY_USER_ROLE)
             .remove(KEY_PERMISSIONS)
             .remove(KEY_SESSION_EXPIRES_AT)
+            .remove(KEY_SESSION_BOOT_INSTANT)
             .apply()
     }
 
@@ -157,6 +171,7 @@ class DeviceCredentialsStore @Inject constructor(
         const val KEY_USER_ROLE = "user_role"
         const val KEY_PERMISSIONS = "permissions"
         const val KEY_SESSION_EXPIRES_AT = "session_expires_at"
+        const val KEY_SESSION_BOOT_INSTANT = "session_boot_instant"
         const val KEY_ORGANIZATION_ID = "organization_id"
         const val KEY_LOCATION_ID = "location_id"
         const val KEY_LOCATION_NAME = "location_name"

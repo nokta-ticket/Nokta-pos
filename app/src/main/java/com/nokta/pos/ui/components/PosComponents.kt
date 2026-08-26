@@ -10,6 +10,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,6 +22,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.nokta.pos.common.Money
 import com.nokta.pos.ui.theme.AlertRed
 import com.nokta.pos.ui.theme.AlertRedLight
@@ -309,6 +314,58 @@ fun PosNumpad(
                             Text(key, style = MaterialTheme.typography.headlineSmall)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Diálogo de tela cheia para digitar manualmente o valor recebido em dinheiro.
+ *
+ * Existe porque um POS que só oferece "Exato" + 3 sugestões fixas de troco
+ * (R$20/R$50/R$100) não cobre o caso comum de o cliente entregar qualquer
+ * outra nota/quantia — sem isto o operador não tinha como registrar o valor
+ * real recebido. Os dígitos entram da direita para a esquerda, como numa
+ * calculadora/maquininha (ex.: "1","5","0" vira R$ 1,50, não "150,00" seguido
+ * de correção) — evita o erro comum de esquecer a vírgula em um teclado de
+ * texto livre.
+ */
+@Composable
+fun ReceivedAmountDialog(
+    initialCents: Long,
+    onConfirm: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var cents by remember { mutableStateOf(initialCents) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Valor recebido", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    Money(cents).formatBRL(),
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(20.dp))
+                PosNumpad(
+                    onDigit = { d ->
+                        // Máximo R$ 999.999,99 — teto generoso só para não estourar Long/UI.
+                        if (cents < 99_999_999L) cents = cents * 10 + (d - '0')
+                    },
+                    onBackspace = { cents /= 10 },
+                    modifier = Modifier.width(260.dp),
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                    Button(
+                        onClick = { onConfirm(cents) },
+                        enabled = cents > 0,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Usar valor") }
                 }
             }
         }

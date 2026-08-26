@@ -11,6 +11,7 @@ import com.nokta.pos.network.NoktaApi
 import com.nokta.pos.network.dto.CreateOrderRequest
 import com.nokta.pos.network.dto.CreatePaymentRequest
 import com.nokta.pos.network.dto.CreateTabRequest
+import com.nokta.pos.network.humanizedApiMessage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -90,6 +91,20 @@ class SyncEngine @Inject constructor(
                     outboxDao.delete(operation)
                     processed++
                     _events.tryEmit(SyncEvent.OperationRejected(operation.type, outcome.reason))
+
+                    // Sem serverId, toda operação restante desta comanda
+                    // (SEND_ORDER/REGISTER_PAYMENT, que dependem do serverId
+                    // que só o CREATE_TAB cria) nunca teria como ser aceita —
+                    // sem esta cascata elas ficam retentando para sempre,
+                    // bloqueando inclusive a fila inteira (a ordem por
+                    // `sequence` nunca deixa nada depois delas ser
+                    // processado). Cobre tanto o CREATE_TAB rejeitado agora
+                    // quanto uma comanda que já ficou órfã antes desta
+                    // cascata existir.
+                    if (tabDao.getTabByLocalId(operation.tabLocalId)?.serverId == null) {
+                        outboxDao.rejectAllForTab(operation.tabLocalId, "Comanda não sincronizada: ${outcome.reason}")
+                        tabDao.markTabFailed(operation.tabLocalId)
+                    }
                 }
                 is StepOutcome.Retry -> {
                     outboxDao.update(operation.copy(status = OutboxStatus.FAILED_RETRYABLE, retryCount = operation.retryCount + 1, lastError = outcome.reason, lastAttemptAtEpochMs = System.currentTimeMillis()))
@@ -134,25 +149,27 @@ class SyncEngine @Inject constructor(
             }
             OutboxOperationType.SEND_ORDER -> {
                 val request = json.decodeFromString<CreateOrderRequest>(operation.payloadJson)
-                val serverId = requireTabServerId(operation.tabLocalId)
-                if (serverId == null) {
-                    StepOutcome.Retry("Comanda ainda não sincronizada")
-                } else {
-                    val order = api.createOrder(operation.organizationId, serverId, request)
-                    api.sendOrder(operation.organizationId, order.id)
-                    refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId)
-                    StepOutcome.Success
+                when (val serverId = resolveTabServerIdOrWaitReason(operation.tabLocalId)) {
+                    is TabServerIdLookup.Resolved -> {
+                        val order = api.createOrder(operation.organizationId, serverId.value, request)
+                        api.sendOrder(operation.organizationId, order.id)
+                        refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId.value)
+                        StepOutcome.Success
+                    }
+                    TabServerIdLookup.StillWaiting -> StepOutcome.Retry("Comanda ainda não sincronizada")
+                    TabServerIdLookup.Orphaned -> StepOutcome.Rejected("Comanda nunca foi criada no servidor")
                 }
             }
             OutboxOperationType.REGISTER_PAYMENT -> {
                 val request = json.decodeFromString<CreatePaymentRequest>(operation.payloadJson)
-                val serverId = requireTabServerId(operation.tabLocalId)
-                if (serverId == null) {
-                    StepOutcome.Retry("Comanda ainda não sincronizada")
-                } else {
-                    api.createPayment(operation.organizationId, serverId, request)
-                    refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId)
-                    StepOutcome.Success
+                when (val serverId = resolveTabServerIdOrWaitReason(operation.tabLocalId)) {
+                    is TabServerIdLookup.Resolved -> {
+                        api.createPayment(operation.organizationId, serverId.value, request)
+                        refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId.value)
+                        StepOutcome.Success
+                    }
+                    TabServerIdLookup.StillWaiting -> StepOutcome.Retry("Comanda ainda não sincronizada")
+                    TabServerIdLookup.Orphaned -> StepOutcome.Rejected("Comanda nunca foi criada no servidor")
                 }
             }
             OutboxOperationType.CANCEL_ITEM, OutboxOperationType.CLOSE_TAB, OutboxOperationType.ADD_ITEM -> {
@@ -166,13 +183,32 @@ class SyncEngine @Inject constructor(
     } catch (e: IOException) {
         StepOutcome.Retry(e.message ?: "Sem conexão")
     } catch (e: HttpException) {
-        if (e.code() in 400..499) StepOutcome.Rejected(e.message() ?: "Operação recusada pelo servidor (${e.code()})")
+        if (e.code() in 400..499) StepOutcome.Rejected(e.humanizedApiMessage("Operação recusada pelo servidor (${e.code()})"))
         else StepOutcome.Retry("Servidor indisponível (${e.code()})")
     } catch (e: Exception) {
         StepOutcome.Retry(e.message ?: "Falha ao sincronizar")
     }
 
-    private suspend fun requireTabServerId(tabLocalId: String): Long? = tabDao.getTabByLocalId(tabLocalId)?.serverId
+    private sealed class TabServerIdLookup {
+        data class Resolved(val value: Long) : TabServerIdLookup()
+        /** CREATE_TAB desta comanda ainda está pendente na fila — vale a pena esperar. */
+        data object StillWaiting : TabServerIdLookup()
+        /**
+         * Sem `serverId` E sem nenhum CREATE_TAB pendente para esta comanda:
+         * ele já foi processado (com sucesso, o que teria gravado o
+         * `serverId` — ou rejeitado, cuja cascata normalmente já teria
+         * rejeitado esta operação também). Isto cobre o caso de dado
+         * corrompido por uma versão anterior do app, sem a cascata em
+         * [OutboxDao.rejectAllForTab]: nunca há mais nada a esperar.
+         */
+        data object Orphaned : TabServerIdLookup()
+    }
+
+    private suspend fun resolveTabServerIdOrWaitReason(tabLocalId: String): TabServerIdLookup {
+        tabDao.getTabByLocalId(tabLocalId)?.serverId?.let { return TabServerIdLookup.Resolved(it) }
+        val hasPendingCreateTab = outboxDao.getPendingForTab(tabLocalId).any { it.type == OutboxOperationType.CREATE_TAB }
+        return if (hasPendingCreateTab) TabServerIdLookup.StillWaiting else TabServerIdLookup.Orphaned
+    }
 
     private suspend fun refreshTabSnapshot(organizationId: Long, tabLocalId: String, serverId: Long) {
         val response = api.getTab(organizationId, serverId)

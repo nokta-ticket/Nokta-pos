@@ -94,6 +94,9 @@ data class TabItem(
     val localId: String,
     val serverId: Long?,
     val orderId: Long?,
+    /** Catálogo de origem — necessário para relançar a mesma linha (ajuste de quantidade). */
+    val menuItemId: Long,
+    val variantId: Long,
     val productName: String,
     val variantName: String,
     val quantity: Int,

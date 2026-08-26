@@ -2,6 +2,12 @@ package com.nokta.pos.network.dto
 
 import kotlinx.serialization.Serializable
 
+// ---- Caixa (VenueCashSession) ----
+
+/** `GET locations/:id/cash-status` — só isOpen, sem nenhum dado sensível (valores, quem abriu). */
+@Serializable
+data class CashStatusResponse(val isOpen: Boolean)
+
 // ---- Comanda (VenueTab) ----
 
 @Serializable

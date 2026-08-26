@@ -78,6 +78,19 @@ interface NoktaApi {
         @Query("search") search: String? = null,
     ): List<TabResponse>
 
+    // ---- Caixa ----
+
+    /**
+     * Só-leitura, permissão mínima (venue.access) — existe para o app avisar
+     * ANTES do operador montar o pedido inteiro, não só quando o pagamento
+     * já foi recusado por caixa fechado.
+     */
+    @GET("organizations/{orgId}/venue/operation/locations/{locationId}/cash-status")
+    suspend fun getCashStatus(
+        @Path("orgId") organizationId: Long,
+        @Path("locationId") locationId: Long,
+    ): CashStatusResponse
+
     // ---- Mesas ----
 
     /** Já vem com `openTab` de cada mesa — ocupação e consumo numa única chamada. */

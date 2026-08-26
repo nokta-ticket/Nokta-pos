@@ -69,6 +69,15 @@ data class HomeUiState(
     val lastSyncAt: Long? = null,
     /** Mesas e comandas ainda abertas nesta unidade. `null` = ainda carregando. */
     val openTabsCount: Int? = null,
+    /**
+     * Se há caixa aberto na unidade agora. `null` = ainda não sabemos (carregando,
+     * sem rede, ou a unidade não exige caixa aberto para pagar — ver
+     * [requiresCashSession]) — nesse estado a Home nunca mostra aviso, para não
+     * arriscar um falso positivo.
+     */
+    val isCashOpen: Boolean? = null,
+    /** Config da unidade (device-login) — só faz sentido avisar se isto for true. */
+    val requiresCashSession: Boolean = true,
 ) {
     /** Mesas primeiro em serviço de mesa; balcão continua disponível em todo modo. */
     val highlightTables: Boolean get() = operationMode != OperationMode.COUNTER_SERVICE
@@ -103,6 +112,7 @@ class HomeViewModel @Inject constructor(
             access = authRepository.currentAccess(),
             operationMode = OperationMode.parse(authRepository.operationMode()),
             isOnline = connectivityMonitor.isOnline(),
+            requiresCashSession = authRepository.requiresOpenCashSessionForPayments(),
         ),
     )
     val state: StateFlow<HomeUiState> = _state
@@ -143,7 +153,25 @@ class HomeViewModel @Inject constructor(
 
         syncPending()
         loadOpenTabsCount()
+        loadCashStatus()
         warmUpMenuCache()
+    }
+
+    /**
+     * Consulta se há caixa aberto ANTES do operador montar qualquer pedido —
+     * sem isso, ele só descobria na hora de cobrar, depois de já ter lançado
+     * tudo (P4 do plano de evolução). Sem custo se a unidade não exige caixa
+     * aberto para pagar (`requiresCashSession=false`): a Home nunca precisa
+     * saber disso nesse caso.
+     */
+    private fun loadCashStatus() {
+        if (!_state.value.requiresCashSession) return
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val locationId = authRepository.currentLocationId() ?: return
+        viewModelScope.launch {
+            val isOpen = tabRepository.isCashOpen(organizationId, locationId)
+            _state.value = _state.value.copy(isCashOpen = isOpen)
+        }
     }
 
     /**
@@ -230,6 +258,7 @@ class HomeViewModel @Inject constructor(
         if (organizationId != null && locationId != null) {
             viewModelScope.launch { tabRepository.searchOpenTabs(organizationId, locationId) }
         }
+        loadCashStatus()
     }
 
     /** Resolve o `Tab.id` (Long) de uma tentativa de pagamento pendente para o `localId` que a navegação usa. */
