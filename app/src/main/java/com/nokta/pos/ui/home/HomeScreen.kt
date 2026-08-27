@@ -42,7 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.nokta.pos.BuildConfig
 import com.nokta.pos.common.Money
+import com.nokta.pos.ui.components.NoktaFooter
 import com.nokta.pos.ui.components.PosInlineWarning
 import com.nokta.pos.ui.theme.*
 
@@ -218,7 +220,10 @@ fun HomeContent(
                 // respiro dos Spacers fixos de cima.
                 Spacer(Modifier.heightIn(min = 16.dp).weight(1f))
 
-                NoktaWordmark(modifier = Modifier.fillMaxWidth())
+                NoktaFooter(
+                    modifier = Modifier.fillMaxWidth(),
+                    appVersion = BuildConfig.VERSION_NAME,
+                )
             }
         }
 
@@ -775,22 +780,6 @@ private fun ShortcutsRow(
             )
         }
     }
-}
-
-/* ------------------------------ Rodapé ------------------------------ */
-
-@Composable
-private fun NoktaWordmark(modifier: Modifier = Modifier) {
-    // Trocar por Image(painterResource(R.drawable.logo_nokta)) quando o asset entrar.
-    Text(
-        text = "NOKTA",
-        modifier = modifier,
-        textAlign = TextAlign.Center,
-        fontSize = 17.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 5.sp,
-        color = NoktaInk,
-    )
 }
 
 /* --------------------- Chevron fino (custom) ------------------------ */
