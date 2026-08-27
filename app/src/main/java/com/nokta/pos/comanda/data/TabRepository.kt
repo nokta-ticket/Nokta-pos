@@ -393,7 +393,11 @@ class TabRepository @Inject constructor(
         val item = tabDao.getItemByLocalId(itemLocalId) ?: return CancelItemOutcome.NotFound
         val serverId = item.serverId
         if (serverId == null) {
-            tabDao.deleteItemsForTab(item.tabLocalId) // remove só este item seria ideal; ver nota abaixo
+            // BUG anterior: usava deleteItemsForTab(tabLocalId), que apaga TODOS
+            // os itens da comanda — inofensivo só quando havia 1 item só. Com 2+
+            // itens (alguns já confirmados, um ainda rascunho), removeria os
+            // confirmados da visão local também, dessincronizando do servidor.
+            tabDao.deleteItemByLocalId(itemLocalId)
             return CancelItemOutcome.RemovedLocalDraft
         }
         return try {

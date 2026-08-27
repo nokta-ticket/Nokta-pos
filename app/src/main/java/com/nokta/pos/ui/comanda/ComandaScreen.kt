@@ -80,6 +80,7 @@ fun ComandaScreen(
                     tab = state.tab!!,
                     canCancelItems = state.access.canManageTabs || state.access.canCreateOrders,
                     onCancelItem = viewModel::askCancelItem,
+                    onRemoveDraftItem = viewModel::removeDraftItem,
                 )
             }
 
@@ -103,7 +104,12 @@ fun ComandaScreen(
 }
 
 @Composable
-private fun ComandaContent(tab: Tab, canCancelItems: Boolean, onCancelItem: (TabItem) -> Unit) {
+private fun ComandaContent(
+    tab: Tab,
+    canCancelItems: Boolean,
+    onCancelItem: (TabItem) -> Unit,
+    onRemoveDraftItem: (TabItem) -> Unit,
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -134,7 +140,13 @@ private fun ComandaContent(tab: Tab, canCancelItems: Boolean, onCancelItem: (Tab
             )
         } else {
             tab.items.forEach { item ->
-                ItemRow(item = item, canCancel = canCancelItems && !item.status.isCanceled, onCancel = { onCancelItem(item) })
+                ItemRow(
+                    item = item,
+                    canCancel = canCancelItems && !item.status.isCanceled,
+                    onCancel = {
+                        if (item.canRemoveAsDraft) onRemoveDraftItem(item) else onCancelItem(item)
+                    },
+                )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
             }
         }
@@ -241,7 +253,11 @@ private fun ItemRow(item: TabItem, canCancel: Boolean, onCancel: () -> Unit) {
                 TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 8.dp)) {
                     Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Cancelar")
+                    // Remover (rascunho, sem motivo) e Cancelar (já lançado,
+                    // motivo obrigatório) são ações diferentes — o rótulo
+                    // precisa deixar isso óbvio antes do toque, não só o
+                    // dialog que abre depois.
+                    Text(if (item.canRemoveAsDraft) "Remover" else "Cancelar")
                 }
             }
         }

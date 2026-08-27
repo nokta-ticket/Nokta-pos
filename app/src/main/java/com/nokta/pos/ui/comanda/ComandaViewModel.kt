@@ -80,9 +80,27 @@ class ComandaViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Remover (item ainda não confirmado pelo servidor, `serverId == null`) e
+     * Cancelar (item já lançado) são ações DIFERENTES, não a mesma ação com
+     * nome trocado: remover é edição de rascunho, sem rastro; cancelar reverte
+     * algo que já foi de fato registrado, e por isso sempre exige motivo. Cada
+     * botão de item já chama a função certa (ver [TabItem.canRemoveAsDraft]).
+     */
     fun askCancelItem(item: TabItem) { _state.value = _state.value.copy(itemPendingCancel = item) }
     fun dismissCancelItem() { _state.value = _state.value.copy(itemPendingCancel = null) }
     fun clearActionMessage() { _state.value = _state.value.copy(actionMessage = null) }
+
+    /** Remove um item ainda não enviado ao servidor — edição, não auditoria: sem motivo, sem confirmação. */
+    fun removeDraftItem(item: TabItem) {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        viewModelScope.launch {
+            runCatching { tabRepository.cancelItem(organizationId, item.localId, reason = "") }
+                .onSuccess { _state.value = _state.value.copy(actionMessage = "Item removido.") }
+                .onFailure { e -> _state.value = _state.value.copy(actionMessage = e.message ?: "Não foi possível remover o item.") }
+            closeCounterTabIfZeroedByCancellation()
+        }
+    }
 
     /**
      * Cancela um item lançado por engano. O backend nunca apaga da ledger:
@@ -118,7 +136,33 @@ class ComandaViewModel @Inject constructor(
                         actionMessage = e.message ?: "Não foi possível cancelar o item.",
                     )
                 }
+            closeCounterTabIfZeroedByCancellation()
         }
+    }
+
+    /**
+     * Balcão não é comanda de mesa — não existe "deixar aberto esperando
+     * alguém decidir" numa venda avulsa. Se o cancelamento zerou a conta
+     * (nenhum item ativo restante, `paid == 0`) e é do tipo COUNTER, encerra
+     * sozinho em vez de ficar "Pago R$0,00" parado em Abertas. Comanda de
+     * MESA/INDIVIDUAL nunca fecha sozinha aqui — o operador pode estar só
+     * ajustando itens antes de continuar o consumo da mesa.
+     */
+    private suspend fun closeCounterTabIfZeroedByCancellation() {
+        // Lê o Room direto (não `_state.value.tab`): o cancelamento acabou de
+        // persistir a mudança ali, e o StateFlow de `observeTab()` pode ainda
+        // não ter re-emitido no exato instante em que este código roda.
+        val tab = tabRepository.getCachedTab(tabLocalId) ?: return
+        val allCanceled = tab.items.isNotEmpty() && tab.activeItems.isEmpty()
+        if (tab.type != com.nokta.pos.comanda.domain.TabType.COUNTER) return
+        if (!tab.isOpen || !allCanceled || tab.paid.isPositive()) return
+
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        runCatching { tabRepository.closeTab(organizationId, tabLocalId) }
+            .onSuccess { _state.value = _state.value.copy(closed = true) }
+        // Falha aqui é silenciosa de propósito: o operador já viu a mensagem
+        // do cancelamento em si; o pior caso é a comanda ficar em Abertas
+        // como já ficava antes desta mudança, nunca um estado pior.
     }
 
     /**

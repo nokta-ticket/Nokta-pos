@@ -78,7 +78,18 @@ data class HomeUiState(
     val isCashOpen: Boolean? = null,
     /** Config da unidade (device-login) — só faz sentido avisar se isto for true. */
     val requiresCashSession: Boolean = true,
+    /**
+     * Toast de "caixa fechado" já mostrado nesta sessão da Home — aparece uma
+     * vez (5s, dispensável no X) quando [isCashOpen] vira `false`; depois disso
+     * o aviso continua acessível só pelo sino no cabeçalho, nunca de novo como
+     * toast (evita reaparecer sozinho a cada `refresh()`/volta à tela).
+     */
+    val cashClosedToastShown: Boolean = false,
+    /** Sino do cabeçalho tocado — reabre o aviso completo sob demanda. */
+    val cashWarningDialogOpen: Boolean = false,
 ) {
+    /** Existe algo para o sino badge mostrar. */
+    val hasCashWarning: Boolean get() = isCashOpen == false
     /** Mesas primeiro em serviço de mesa; balcão continua disponível em todo modo. */
     val highlightTables: Boolean get() = operationMode != OperationMode.COUNTER_SERVICE
 
@@ -274,6 +285,20 @@ class HomeViewModel @Inject constructor(
             cieloProvider.discardPendingAttempt()
             _state.value = _state.value.copy(pendingPaymentAttempt = null)
         }
+    }
+
+    /** Toast de caixa fechado dispensado (pelo X ou pelo tempo) — não reaparece sozinho. */
+    fun dismissCashClosedToast() {
+        _state.value = _state.value.copy(cashClosedToastShown = true)
+    }
+
+    /** Toque no sino: reabre o aviso completo. */
+    fun openCashWarningDialog() {
+        _state.value = _state.value.copy(cashWarningDialogOpen = true)
+    }
+
+    fun dismissCashWarningDialog() {
+        _state.value = _state.value.copy(cashWarningDialogOpen = false)
     }
 
     fun logout() = authRepository.logoutOperator()

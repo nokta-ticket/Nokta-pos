@@ -110,6 +110,15 @@ data class TabItem(
     val syncState: LocalSyncState = LocalSyncState.SYNCED,
 ) {
     val id: String get() = localId
+
+    /**
+     * Ainda não confirmado pelo servidor — remover é edição local (desfazer um
+     * lançamento por engano antes dele existir de verdade), nunca um
+     * "cancelamento" auditado. Item já confirmado (`serverId != null`) segue
+     * sempre pelo fluxo de cancelamento com motivo obrigatório.
+     */
+    val canRemoveAsDraft: Boolean get() = serverId == null
+
     /** Descrição completa da linha, incluindo adicionais e observação. */
     val detailLine: String?
         get() {

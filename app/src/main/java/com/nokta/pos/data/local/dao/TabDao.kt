@@ -113,6 +113,10 @@ interface TabDao {
     @Query("DELETE FROM tab_item WHERE tabLocalId = :tabLocalId")
     suspend fun deleteItemsForTab(tabLocalId: String)
 
+    /** Remove só este item — nunca use [deleteItemsForTab] para isto, que apaga a comanda inteira. */
+    @Query("DELETE FROM tab_item WHERE localId = :localId")
+    suspend fun deleteItemByLocalId(localId: String)
+
     // ---- Pedidos ----
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

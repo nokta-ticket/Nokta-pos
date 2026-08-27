@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
@@ -86,8 +87,15 @@ fun HomeScreen(
         onComandas = onComandas,
         onHistorico = onHistorico,
         onLogout = { viewModel.logout(); onLogout() },
+        onDismissCashClosedToast = viewModel::dismissCashClosedToast,
+        onOpenCashWarning = viewModel::openCashWarningDialog,
+        onDismissCashWarning = viewModel::dismissCashWarningDialog,
     )
 }
+
+/** Texto do aviso de caixa fechado — mesmo texto no toast e no dialog reaberto pelo sino. */
+private const val CASH_CLOSED_MESSAGE =
+    "Caixa fechado nesta unidade — pagamentos serão recusados até um gerente abrir o caixa no painel (Operação › Caixa). Você ainda pode lançar pedidos normalmente."
 
 /**
  * Conteúdo visual da Home, sem ViewModel.
@@ -104,102 +112,169 @@ fun HomeContent(
     onComandas: () -> Unit,
     onHistorico: () -> Unit,
     onLogout: () -> Unit,
+    onDismissCashClosedToast: () -> Unit = {},
+    onOpenCashWarning: () -> Unit = {},
+    onDismissCashWarning: () -> Unit = {},
 ) {
     val access = state.access
+
+    // Toast de 5s só na primeira vez que o fechamento é detectado nesta
+    // sessão da Home — depois disso o aviso só volta se o operador tocar
+    // no sino (ver hasCashWarning/cashWarningDialogOpen).
+    LaunchedEffect(state.hasCashWarning, state.cashClosedToastShown) {
+        if (state.hasCashWarning && !state.cashClosedToastShown) {
+            kotlinx.coroutines.delay(5000)
+            onDismissCashClosedToast()
+        }
+    }
 
     // Scroll + `fillMaxHeight` no conteúdo: numa tela alta (o caso das
     // maquininhas) o conteúdo ocupa a altura inteira e a assinatura ancora no
     // rodapé em vez de flutuar no meio do vazio; numa tela curta, rola
     // normalmente em vez de espremer os cards.
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(NoktaBackground)
-            .verticalScroll(rememberScrollState()),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = LocalConfiguration.current.screenHeightDp.dp)
-                .padding(horizontal = 20.dp)
-                .padding(top = 24.dp, bottom = 20.dp),
+                .fillMaxSize()
+                .background(NoktaBackground)
+                .verticalScroll(rememberScrollState()),
         ) {
-            Header(
-                userName = state.operatorName ?: "operador",
-                unitName = state.locationName,
-                onLogout = onLogout,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LocalConfiguration.current.screenHeightDp.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 24.dp, bottom = 20.dp),
+            ) {
+                Header(
+                    userName = state.operatorName ?: "operador",
+                    unitName = state.locationName,
+                    onLogout = onLogout,
+                    showCashBell = state.requiresCashSession,
+                    cashWarningActive = state.hasCashWarning,
+                    onCashBellClick = onOpenCashWarning,
+                )
 
-            Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(20.dp))
 
-            StatusRow(state = state)
+                StatusRow(state = state)
 
-            if (!access.canTakePayments) {
+                if (!access.canTakePayments) {
+                    Spacer(Modifier.height(16.dp))
+                    PosInlineWarning(
+                        "Seu perfil não registra pagamentos. Você lança itens; o fechamento é do caixa.",
+                    )
+                }
+
                 Spacer(Modifier.height(16.dp))
-                PosInlineWarning(
-                    "Seu perfil não registra pagamentos. Você lança itens; o fechamento é do caixa.",
-                )
-            }
 
-            // isCashOpen == false: sabemos com certeza que está fechado — avisa
-            // cedo, antes do operador montar um pedido que não vai conseguir
-            // cobrar. null (ainda carregando, sem rede, ou consulta falhou)
-            // nunca gera aviso — um falso "fechado" pararia o garçom à toa.
-            if (state.isCashOpen == false) {
-                Spacer(Modifier.height(16.dp))
-                PosInlineWarning(
-                    "Caixa fechado nesta unidade — pagamentos serão recusados até um gerente abrir o caixa no painel (Operação › Caixa). Você ainda pode lançar pedidos normalmente.",
-                )
-            }
+                NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
 
-            Spacer(Modifier.height(16.dp))
-
-            NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
-
-            Spacer(Modifier.height(14.dp))
-
-            val tables: @Composable RowScope.() -> Unit = {
-                BigActionCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Outlined.TableRestaurant,
-                    title = "Mesas",
-                    subtitle = "Consultar consumo\ne lançar itens",
-                    enabled = access.canViewTables,
-                    onClick = onMesas,
-                )
-            }
-            val tabs: @Composable RowScope.() -> Unit = {
-                BigActionCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Outlined.ReceiptLong,
-                    title = "Comandas",
-                    subtitle = "Consultar por número\nou cliente",
-                    enabled = access.canViewTabs,
-                    onClick = onComandas,
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                // Balcão puro: comanda antes de mesa (mesa quase não é usada).
-                if (state.highlightTables) { tables(); tabs() } else { tabs(); tables() }
-            }
-
-            if (access.canViewTabs) {
                 Spacer(Modifier.height(14.dp))
-                ShortcutsRow(
-                    openTabsCount = state.openTabsCount,
-                    onOpenTabs = onComandas,
-                    onHistory = onHistorico,
-                )
+
+                val tables: @Composable RowScope.() -> Unit = {
+                    BigActionCard(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.TableRestaurant,
+                        title = "Mesas",
+                        subtitle = "Consultar consumo\ne lançar itens",
+                        enabled = access.canViewTables,
+                        onClick = onMesas,
+                    )
+                }
+                val tabs: @Composable RowScope.() -> Unit = {
+                    BigActionCard(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.ReceiptLong,
+                        title = "Comandas",
+                        subtitle = "Consultar por número\nou cliente",
+                        enabled = access.canViewTabs,
+                        onClick = onComandas,
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Balcão puro: comanda antes de mesa (mesa quase não é usada).
+                    if (state.highlightTables) { tables(); tabs() } else { tabs(); tables() }
+                }
+
+                if (access.canViewTabs) {
+                    Spacer(Modifier.height(14.dp))
+                    ShortcutsRow(
+                        openTabsCount = state.openTabsCount,
+                        onOpenTabs = onComandas,
+                        onHistory = onHistorico,
+                    )
+                }
+
+                // Empurra a assinatura para o rodapé; com 26dp de folga mínima
+                // para telas curtas, onde o peso não sobra.
+                Spacer(Modifier.heightIn(min = 26.dp).weight(1f))
+
+                NoktaWordmark(modifier = Modifier.fillMaxWidth())
             }
+        }
 
-            // Empurra a assinatura para o rodapé; com 26dp de folga mínima
-            // para telas curtas, onde o peso não sobra.
-            Spacer(Modifier.heightIn(min = 26.dp).weight(1f))
+        // Toast de 5s, só na primeira detecção do fechamento nesta sessão da
+        // Home — dispensável a qualquer momento pelo X. Depois de dispensado
+        // (pelo X ou pelo tempo), o aviso só reaparece via sino no cabeçalho.
+        if (state.hasCashWarning && !state.cashClosedToastShown) {
+            CashClosedToast(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                onDismiss = onDismissCashClosedToast,
+            )
+        }
 
-            NoktaWordmark(modifier = Modifier.fillMaxWidth())
+        if (state.cashWarningDialogOpen) {
+            CashWarningDialog(onDismiss = onDismissCashWarning)
         }
     }
+}
+
+/** Toast auto-dispensável (chamador cuida do timer) com botão de fechar manual. */
+@Composable
+private fun CashClosedToast(modifier: Modifier = Modifier, onDismiss: () -> Unit) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(WarningAmberLight)
+            .border(1.dp, WarningAmber.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Caixa fechado nesta unidade. Toque no sino para saber mais.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = WarningAmber,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "×",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = WarningAmber,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onDismiss)
+                .padding(horizontal = 10.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun CashWarningDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Entendi") }
+        },
+        title = { Text("Caixa fechado") },
+        text = { Text(CASH_CLOSED_MESSAGE) },
+    )
 }
 
 /* ------------------------------ Header ------------------------------ */
@@ -214,6 +289,9 @@ private fun Header(
     userName: String,
     unitName: String?,
     onLogout: () -> Unit,
+    showCashBell: Boolean = false,
+    cashWarningActive: Boolean = false,
+    onCashBellClick: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,6 +305,11 @@ private fun Header(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+
+            if (showCashBell) {
+                CashBellButton(active = cashWarningActive, onClick = onCashBellClick)
+                Spacer(Modifier.width(8.dp))
+            }
 
             Column(
                 modifier = Modifier
@@ -262,6 +345,41 @@ private fun Header(
                 color = NoktaMuted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Sino de avisos operacionais (hoje só caixa fechado). Badge vermelho só
+ * quando há algo pendente — sem badge, o sino fica neutro (mesmo visual do
+ * botão "Sair" ao lado) para não competir por atenção à toa.
+ */
+@Composable
+private fun CashBellButton(active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(NoktaSurface)
+            .border(1.dp, NoktaBorderStrong, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Notifications,
+            contentDescription = if (active) "Avisos (caixa fechado)" else "Avisos",
+            tint = if (active) WarningAmber else NoktaInkSoft,
+            modifier = Modifier.size(22.dp),
+        )
+        if (active) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(AlertRed),
             )
         }
     }
