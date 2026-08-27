@@ -86,7 +86,9 @@ fun HomeScreen(
         onMesas = onMesas,
         onComandas = onComandas,
         onHistorico = onHistorico,
-        onLogout = { viewModel.logout(); onLogout() },
+        onLogout = { viewModel.requestLogout(onLogout) },
+        onConfirmLogoutOffline = { viewModel.confirmLogoutOffline(onLogout) },
+        onDismissLogoutConfirmation = viewModel::dismissLogoutConfirmation,
         onDismissCashClosedToast = viewModel::dismissCashClosedToast,
         onOpenCashWarning = viewModel::openCashWarningDialog,
         onDismissCashWarning = viewModel::dismissCashWarningDialog,
@@ -112,6 +114,8 @@ fun HomeContent(
     onComandas: () -> Unit,
     onHistorico: () -> Unit,
     onLogout: () -> Unit,
+    onConfirmLogoutOffline: () -> Unit = {},
+    onDismissLogoutConfirmation: () -> Unit = {},
     onDismissCashClosedToast: () -> Unit = {},
     onOpenCashWarning: () -> Unit = {},
     onDismissCashWarning: () -> Unit = {},
@@ -230,6 +234,13 @@ fun HomeContent(
         if (state.cashWarningDialogOpen) {
             CashWarningDialog(onDismiss = onDismissCashWarning)
         }
+
+        if (state.logoutConfirmationOpen) {
+            LogoutConfirmationDialog(
+                onConfirm = onConfirmLogoutOffline,
+                onDismiss = onDismissLogoutConfirmation,
+            )
+        }
     }
 }
 
@@ -274,6 +285,32 @@ private fun CashWarningDialog(onDismiss: () -> Unit) {
         },
         title = { Text("Caixa fechado") },
         text = { Text(CASH_CLOSED_MESSAGE) },
+    )
+}
+
+/**
+ * Só aparece quando o operador toca "Sair" SEM rede (ver
+ * [HomeViewModel.requestLogout]). Login novo exige validar senha contra o
+ * backend — sem conexão, ninguém consegue entrar depois, então o terminal
+ * fica sem operador até a rede voltar. Isto não bloqueia a saída (decisão do
+ * operador é respeitada), só garante que ele sabe a consequência antes.
+ */
+@Composable
+private fun LogoutConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sem conexão") },
+        text = {
+            Text(
+                "Você está offline. Se sair agora, este terminal ficará sem operador até a conexão voltar.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Sair mesmo assim") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Continuar no caixa") }
+        },
     )
 }
 

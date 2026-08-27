@@ -87,6 +87,13 @@ data class HomeUiState(
     val cashClosedToastShown: Boolean = false,
     /** Sino do cabeçalho tocado — reabre o aviso completo sob demanda. */
     val cashWarningDialogOpen: Boolean = false,
+    /**
+     * "Sair" tocado enquanto offline — confirmação com aviso forte antes de
+     * derrubar a sessão do operador (ver [HomeViewModel.requestLogout]).
+     * Nunca aparece online: ali o próximo operador consegue logar de volta
+     * na hora, então o logout acontece direto, sem fricção.
+     */
+    val logoutConfirmationOpen: Boolean = false,
 ) {
     /** Existe algo para o sino badge mostrar. */
     val hasCashWarning: Boolean get() = isCashOpen == false
@@ -301,5 +308,32 @@ class HomeViewModel @Inject constructor(
         _state.value = _state.value.copy(cashWarningDialogOpen = false)
     }
 
-    fun logout() = authRepository.logoutOperator()
+    /**
+     * Online: desloga direto — o próximo operador consegue autenticar contra
+     * o backend imediatamente, sem risco de deixar o terminal preso.
+     *
+     * Offline: um `deviceLogin` novo é impossível sem rede (precisa validar
+     * senha contra o servidor), então sair agora deixaria o terminal SEM
+     * NENHUM operador até a conexão voltar. Isso é uma decisão consciente do
+     * operador, não um bug — por isso não é bloqueado, só confirmado com
+     * aviso explícito da consequência (ver [LogoutConfirmationDialog]).
+     */
+    fun requestLogout(onLoggedOut: () -> Unit) {
+        if (!_state.value.isOnline) {
+            _state.value = _state.value.copy(logoutConfirmationOpen = true)
+            return
+        }
+        authRepository.logoutOperator()
+        onLoggedOut()
+    }
+
+    fun confirmLogoutOffline(onLoggedOut: () -> Unit) {
+        _state.value = _state.value.copy(logoutConfirmationOpen = false)
+        authRepository.logoutOperator()
+        onLoggedOut()
+    }
+
+    fun dismissLogoutConfirmation() {
+        _state.value = _state.value.copy(logoutConfirmationOpen = false)
+    }
 }
