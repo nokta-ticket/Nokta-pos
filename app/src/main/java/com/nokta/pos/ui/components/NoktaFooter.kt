@@ -25,18 +25,18 @@ import androidx.compose.ui.unit.sp
 import com.nokta.pos.ui.theme.NoktaInk
 import com.nokta.pos.ui.theme.NoktaMutedSoft
 
-private val FooterBg = Color(0xFFFAF9FC)
-private val FooterTopLine = Color(0xFFF1EFF6)
 private val DividerPurple = Color(0xFFB39AF0)
 private val CompanyText = Color(0xFF2E2560)
 
 /**
  * Rodapé institucional do app.
  *
+ * Sem fundo/contorno próprio de propósito — herda o fundo da tela, para não
+ * ler como um card separado do resto do conteúdo.
+ *
  * @param companyName razão social exibida abaixo da marca
  * @param cnpj CNPJ já formatado (00.000.000/0000-00)
  * @param appVersion versão vinda do BuildConfig.VERSION_NAME
- * @param showTopDivider hairline no topo, para telas com conteúdo colado no rodapé
  */
 @Composable
 fun NoktaFooter(
@@ -44,81 +44,66 @@ fun NoktaFooter(
     companyName: String = "Nokta Tecnologia LTDA",
     cnpj: String = "59.386.582/0001-39",
     appVersion: String,
-    showTopDivider: Boolean = true,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(FooterBg),
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (showTopDivider) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(FooterTopLine)
-            )
-        }
-
-        Spacer(Modifier.height(28.dp))
-
         // Trocar por Image(painterResource(R.drawable.logo_nokta)) quando o asset entrar.
         Text(
             text = "NOKTA",
-            fontSize = 20.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 7.sp,
+            letterSpacing = 5.sp,
             color = NoktaInk
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
 
         Box(
             Modifier
-                .width(38.dp)
+                .width(28.dp)
                 .height(2.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(DividerPurple)
         )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
 
         Text(
             text = companyName,
-            fontSize = 12.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = CompanyText,
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(5.dp))
 
         Row(
-            modifier = Modifier.padding(horizontal = 20.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "CNPJ $cnpj",
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 color = NoktaMutedSoft
             )
             Box(
                 Modifier
-                    .padding(horizontal = 9.dp)
+                    .padding(horizontal = 7.dp)
                     .size(3.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(NoktaMutedSoft)
             )
             Text(
                 text = "Versão do app $appVersion",
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 color = NoktaMutedSoft
             )
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
     }
 }
 

@@ -219,12 +219,15 @@ fun HomeContent(
                 // sozinho. min menor (16dp) porque telas curtas já ganham mais
                 // respiro dos Spacers fixos de cima.
                 Spacer(Modifier.heightIn(min = 16.dp).weight(1f))
-
-                NoktaFooter(
-                    modifier = Modifier.fillMaxWidth(),
-                    appVersion = BuildConfig.VERSION_NAME,
-                )
             }
+
+            // Fora do padding horizontal da coluna acima de propósito: o
+            // rodapé ocupa a largura inteira da tela, sem a margem de 20dp
+            // que os cards usam.
+            NoktaFooter(
+                modifier = Modifier.fillMaxWidth(),
+                appVersion = BuildConfig.VERSION_NAME,
+            )
         }
 
         // Toast de 5s, só na primeira detecção do fechamento nesta sessão da
