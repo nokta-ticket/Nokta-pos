@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import com.nokta.pos.ui.theme.NoktaInk
 import com.nokta.pos.ui.theme.NoktaMutedSoft
 
-private val DividerPurple = Color(0xFFB39AF0)
 private val CompanyText = Color(0xFF2E2560)
 
 // Gradiente horizontal roxo → magenta → azul da identidade Nokta (o mesmo
@@ -65,38 +64,28 @@ fun NoktaFooter(
                 .background(TopDividerGradient)
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
         // Trocar por Image(painterResource(R.drawable.logo_nokta)) quando o asset entrar.
         Text(
             text = "NOKTA",
-            fontSize = 15.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 5.sp,
+            letterSpacing = 4.sp,
             color = NoktaInk
         )
 
-        Spacer(Modifier.height(10.dp))
-
-        Box(
-            Modifier
-                .width(28.dp)
-                .height(2.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(DividerPurple)
-        )
-
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(6.dp))
 
         Text(
             text = companyName,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
             color = CompanyText,
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(3.dp))
 
         Row(
             horizontalArrangement = Arrangement.Center,
@@ -104,24 +93,24 @@ fun NoktaFooter(
         ) {
             Text(
                 text = "CNPJ $cnpj",
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 color = NoktaMutedSoft
             )
             Box(
                 Modifier
-                    .padding(horizontal = 7.dp)
+                    .padding(horizontal = 6.dp)
                     .size(3.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(NoktaMutedSoft)
             )
             Text(
                 text = "Versão do app $appVersion",
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 color = NoktaMutedSoft
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
     }
 }
 
