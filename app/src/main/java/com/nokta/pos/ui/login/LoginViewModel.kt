@@ -29,7 +29,12 @@ class LoginViewModel @Inject constructor(
     fun onEmailChanged(v: String) { _state.value = _state.value.copy(email = v, error = null) }
     fun onSenhaChanged(v: String) { _state.value = _state.value.copy(senha = v, error = null) }
 
-    fun submit(onSuccess: () -> Unit) {
+    /**
+     * [onDeviceUnauthorized] só dispara quando o TERMINAL (não a senha) foi
+     * rejeitado — ver [LoginOutcome.DeviceUnauthorized]. A tela deve navegar
+     * para o pareamento, nunca mostrar isto como erro de credencial.
+     */
+    fun submit(onSuccess: () -> Unit, onDeviceUnauthorized: () -> Unit) {
         val s = _state.value
         if (s.email.isBlank() || s.senha.isBlank()) {
             _state.value = s.copy(error = "Informe e-mail e senha.")
@@ -55,6 +60,10 @@ class LoginViewModel @Inject constructor(
                 }
                 is LoginOutcome.Failed -> {
                     _state.value = _state.value.copy(isSubmitting = false, error = outcome.message)
+                }
+                is LoginOutcome.DeviceUnauthorized -> {
+                    _state.value = _state.value.copy(isSubmitting = false)
+                    onDeviceUnauthorized()
                 }
             }
         }

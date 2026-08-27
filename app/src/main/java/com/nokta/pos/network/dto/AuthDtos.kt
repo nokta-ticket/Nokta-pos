@@ -18,6 +18,14 @@ data class RedeemPairingCodeResponse(
 data class DeviceLoginRequest(val email: String, val senha: String)
 
 @Serializable
+data class DeviceStatusResponse(
+    val id: Long,
+    val label: String,
+    val organizationId: Long,
+    val locationId: Long,
+)
+
+@Serializable
 data class DeviceLoginUser(
     val userId: Long,
     val email: String,

@@ -42,6 +42,17 @@ class DeviceCredentialsStore @Inject constructor(
 
     fun isPaired(): Boolean = deviceToken() != null
 
+    /**
+     * O backend rejeitou este `deviceToken` de vez (revogado/desconhecido) —
+     * mantê-lo salvo só faria o app repetir o mesmo erro em toda tentativa
+     * seguinte. Nunca remove a sessão do operador nem as credenciais Cielo
+     * (mesma separação de [clearSession]): perder o pareamento do terminal é
+     * assunto do gerente, não do operador que estava logando.
+     */
+    fun clearDeviceToken() {
+        prefs.edit().remove(KEY_DEVICE_TOKEN).apply()
+    }
+
     fun saveSession(
         jwt: String,
         userId: Long,

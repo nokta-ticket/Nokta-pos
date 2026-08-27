@@ -18,6 +18,14 @@ interface NoktaApi {
     @POST("auth/device-login")
     suspend fun deviceLogin(@Body body: DeviceLoginRequest): DeviceLoginResponse
 
+    /**
+     * Checagem leve "este X-Device-Token ainda é válido?" — 403 se revogado.
+     * Sem side-effect de login/sessão; usada só para descobrir revogação
+     * enquanto o app estava fechado, nunca para bloquear a abertura.
+     */
+    @GET("venue-devices/me")
+    suspend fun getDeviceStatus(): DeviceStatusResponse
+
     /** Permissões granulares do operador — decide o que a UI oferece (backend revalida sempre). */
     @GET("organizations/{orgId}/me/access")
     suspend fun getMeAccess(@Path("orgId") organizationId: Long): MeAccessResponse

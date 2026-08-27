@@ -10,6 +10,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.nokta.pos.session.DeviceEvents
 import com.nokta.pos.session.SessionEvents
 import com.nokta.pos.ui.cardapio.CardapioScreen
 import com.nokta.pos.ui.checkout.CheckoutScreen
@@ -64,7 +65,7 @@ private val tabIdArg = navArgument("tabId") { type = NavType.StringType }
  * arquivos do scanner continuam no projeto, sem tela apontando para eles.
  */
 @Composable
-fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEvents) {
+fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEvents, deviceEvents: DeviceEvents) {
 
     // Sessão caiu em qualquer ponto do app → volta pro login limpando a pilha.
     val expired by sessionEvents.expired.collectAsState(initial = null)
@@ -72,6 +73,18 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         if (expired != null) {
             navController.navigate(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
             sessionEvents.consume()
+        }
+    }
+
+    // Terminal revogado detectado em background (checkDeviceStatus, disparado
+    // pelo Splash) em qualquer ponto do app → volta pro pareamento limpando a
+    // pilha. Canal separado de `sessionEvents`: aqui é o TERMINAL que perdeu
+    // o vínculo, não a sessão do operador — a tela certa é PAIRING, não LOGIN.
+    val deviceRevoked by deviceEvents.revoked.collectAsState(initial = null)
+    LaunchedEffect(deviceRevoked) {
+        if (deviceRevoked != null) {
+            navController.navigate(Routes.PAIRING) { popUpTo(0) { inclusive = true } }
+            deviceEvents.consume()
         }
     }
 
@@ -99,9 +112,18 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         }
 
         composable(Routes.LOGIN) {
-            LoginScreen(onLoggedIn = {
-                navController.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
-            })
+            LoginScreen(
+                onLoggedIn = {
+                    navController.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                },
+                // Terminal revogado enquanto o operador tentava logar — o
+                // deviceToken local já foi limpo pelo AuthRepository, então
+                // manda pra tela de pareamento em vez de deixar o operador
+                // preso repetindo a senha sem nunca conseguir entrar.
+                onDeviceUnauthorized = {
+                    navController.navigate(Routes.PAIRING) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                },
+            )
         }
 
         composable(Routes.HOME) {

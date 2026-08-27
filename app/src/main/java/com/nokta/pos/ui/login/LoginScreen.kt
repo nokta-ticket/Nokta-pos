@@ -31,7 +31,11 @@ import com.nokta.pos.ui.components.PosPrimaryButton
  * código do dashboard de novo.
  */
 @Composable
-fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewModel()) {
+fun LoginScreen(
+    onLoggedIn: () -> Unit,
+    onDeviceUnauthorized: () -> Unit,
+    viewModel: LoginViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsState()
     var passwordVisible by remember { mutableStateOf(false) }
 
@@ -94,7 +98,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
 
         PosPrimaryButton(
             text = "Entrar",
-            onClick = { viewModel.submit(onLoggedIn) },
+            onClick = { viewModel.submit(onLoggedIn, onDeviceUnauthorized) },
             loading = state.isSubmitting,
             enabled = state.email.isNotBlank() && state.senha.isNotBlank(),
         )

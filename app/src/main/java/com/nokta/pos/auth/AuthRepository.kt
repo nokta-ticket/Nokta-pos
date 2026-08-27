@@ -6,6 +6,8 @@ import com.nokta.pos.device.DeviceCredentialsStore
 import com.nokta.pos.network.NoktaApi
 import com.nokta.pos.network.dto.DeviceLoginRequest
 import com.nokta.pos.network.dto.RedeemPairingCodeRequest
+import com.nokta.pos.network.humanizedApiMessage
+import com.nokta.pos.session.DeviceEvents
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,6 +22,15 @@ private fun currentBootInstant(): Long = System.currentTimeMillis() - SystemCloc
 
 /** Ver [AuthRepository.isSessionExpired]. */
 private const val BOOT_INSTANT_TOLERANCE_MS = 60_000L
+
+/**
+ * Mensagem exata de `VenueDeviceTokenGuard` (backend, venue-device-token.guard.ts)
+ * quando o `X-Device-Token` não existe ou foi revogado. Único jeito de
+ * diferenciar "terminal rejeitado" de "senha errada" em `login()`, já que o
+ * guard roda antes de `AuthService.login` e os dois casos chegam como o
+ * mesmo 403 — se o texto do backend mudar, ajustar aqui também.
+ */
+private const val DEVICE_UNAUTHORIZED_MESSAGE = "Dispositivo não autorizado ou revogado."
 
 /**
  * `sessionExpiresAt` chega como ISO-8601 do backend. Convertido para epoch
@@ -37,6 +48,15 @@ sealed class LoginOutcome {
     data class Success(val userName: String, val role: String) : LoginOutcome()
     data object Requires2fa : LoginOutcome()
     data class Failed(val message: String) : LoginOutcome()
+    /**
+     * O TERMINAL (não a credencial do operador) foi rejeitado —
+     * `VenueDeviceTokenGuard` roda antes de `AuthService.login` no backend, e
+     * ambos os casos (terminal revogado, senha errada) chegam como 403 sem
+     * distinção por código HTTP. Antes disto o app tratava os dois como
+     * "E-mail ou senha incorretos", escondendo do gerente que o problema era
+     * o pareamento, não a senha do operador.
+     */
+    data object DeviceUnauthorized : LoginOutcome()
 }
 
 /**
@@ -50,6 +70,7 @@ sealed class LoginOutcome {
 class AuthRepository @Inject constructor(
     private val api: NoktaApi,
     private val credentialsStore: DeviceCredentialsStore,
+    private val deviceEvents: DeviceEvents,
 ) {
 
     fun isDevicePaired(): Boolean = credentialsStore.isPaired()
@@ -64,8 +85,27 @@ class AuthRepository @Inject constructor(
         credentialsStore.saveDeviceToken(response.deviceToken)
     }
 
-    suspend fun login(email: String, senha: String): LoginOutcome = runCatching {
-        val response = api.deviceLogin(DeviceLoginRequest(email, senha))
+    suspend fun login(email: String, senha: String): LoginOutcome {
+        val result = runCatching { api.deviceLogin(DeviceLoginRequest(email, senha)) }
+        val httpCode = (result.exceptionOrNull() as? retrofit2.HttpException)?.code()
+        if (httpCode == 401 || httpCode == 403) {
+            val apiMessage = result.exceptionOrNull()!!.humanizedApiMessage()
+            if (apiMessage == DEVICE_UNAUTHORIZED_MESSAGE) {
+                // Terminal revogado/desconhecido enquanto o operador tentava
+                // logar — o token local nunca mais vai funcionar, então limpa
+                // aqui em vez de deixar o app repetir o mesmo erro disfarçado
+                // de "senha incorreta" a cada tentativa.
+                credentialsStore.clearDeviceToken()
+                return LoginOutcome.DeviceUnauthorized
+            }
+        }
+        return result.fold(
+            onSuccess = { response -> onDeviceLoginSuccess(response) },
+            onFailure = { LoginOutcome.Failed(humanizeLoginError(it)) },
+        )
+    }
+
+    private suspend fun onDeviceLoginSuccess(response: com.nokta.pos.network.dto.DeviceLoginResponse): LoginOutcome {
         if (response.requires2fa) return LoginOutcome.Requires2fa
 
         val token = response.token ?: return LoginOutcome.Failed("Resposta de login inválida.")
@@ -104,15 +144,17 @@ class AuthRepository @Inject constructor(
         // operador não pode fazer (ver OperatorAccess.PERMISSIVE).
         refreshAccess(organizationId)
 
-        LoginOutcome.Success(userName = user.displayName, role = user.role)
-    }.getOrElse { LoginOutcome.Failed(humanizeLoginError(it)) }
+        return LoginOutcome.Success(userName = user.displayName, role = user.role)
+    }
 
     /**
      * `HttpException.message` do Retrofit é algo como "HTTP 403 Forbidden" —
-     * não diz nada útil ao operador. 401/403 no login sempre significa
-     * credencial errada (device-login não distingue "e-mail não existe" de
-     * "senha errada", por segurança); qualquer outro código HTTP ou falha de
-     * rede usa a mensagem genérica.
+     * não diz nada útil ao operador. Chega aqui só depois que `login()` já
+     * descartou o caso "terminal revogado" ([DEVICE_UNAUTHORIZED_MESSAGE]),
+     * então um 401/403 remanescente sempre significa credencial errada
+     * (device-login não distingue "e-mail não existe" de "senha errada", por
+     * segurança); qualquer outro código HTTP ou falha de rede usa a mensagem
+     * genérica.
      */
     private fun humanizeLoginError(e: Throwable): String {
         val code = (e as? retrofit2.HttpException)?.code()
@@ -188,4 +230,25 @@ class AuthRepository @Inject constructor(
 
     /** Troca rápida de operador (seção 8/33 do PRD) — nunca desfaz o pareamento do terminal. */
     fun logoutOperator() = credentialsStore.clearSession()
+
+    /**
+     * Confirma contra o servidor que o terminal ainda está pareado —
+     * `isDevicePaired()` só olha o storage local, que nunca sabe sozinho que
+     * o dashboard revogou o terminal enquanto o app estava fechado.
+     *
+     * Deliberadamente best-effort: qualquer falha que não seja "o servidor
+     * disse 403" (sem rede, timeout, erro 5xx) é ignorada — nunca vira
+     * "revogado" por engano. O terminal continua operando offline como
+     * sempre operou; isto só corrige o caso em que HÁ rede e o servidor
+     * confirma de verdade que o token morreu. Chamar só quando
+     * [isDevicePaired] já é true (nada a checar se não há token local).
+     */
+    suspend fun checkDeviceStatus() {
+        val result = runCatching { api.getDeviceStatus() }
+        val httpCode = (result.exceptionOrNull() as? retrofit2.HttpException)?.code()
+        if (httpCode == 401 || httpCode == 403) {
+            credentialsStore.clearDeviceToken()
+            deviceEvents.notifyRevoked()
+        }
+    }
 }

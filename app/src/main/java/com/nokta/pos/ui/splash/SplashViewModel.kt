@@ -78,6 +78,18 @@ class SplashViewModel @Inject constructor(
             }
         }
 
+        // Confirma o pareamento do terminal contra o servidor em background,
+        // nunca bloqueando a navegação: `isDevicePaired()` acima só provou
+        // que existe um token LOCAL, não que o dashboard ainda o reconhece.
+        // Sem rede, `checkDeviceStatus()` simplesmente não conclui nada — o
+        // app continua abrindo offline normalmente. Com rede, se o servidor
+        // confirmar revogação, `DeviceEvents` leva o app ao pareamento a
+        // partir de QUALQUER tela em que esteja (mesmo padrão de
+        // `SessionEvents` para sessão de operador expirada).
+        if (authRepository.isDevicePaired()) {
+            viewModelScope.launch { authRepository.checkDeviceStatus() }
+        }
+
         _destination.value = destination
     }
 }
