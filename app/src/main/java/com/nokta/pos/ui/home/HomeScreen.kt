@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,21 +133,21 @@ fun HomeContent(
         }
     }
 
-    // Scroll + `fillMaxHeight` no conteúdo: numa tela alta (o caso das
-    // maquininhas) o conteúdo ocupa a altura inteira e a assinatura ancora no
-    // rodapé em vez de flutuar no meio do vazio; numa tela curta, rola
-    // normalmente em vez de espremer os cards.
+    // Sem scroll de propósito: tudo (incluindo o rodapé) precisa caber na
+    // tela inicial de uma vez. O bloco de conteúdo usa `weight(1f)` para
+    // consumir o espaço sobrando e o rodapé fica sempre ancorado embaixo,
+    // nunca abaixo de uma dobra.
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(NoktaBackground)
-                .verticalScroll(rememberScrollState()),
+                .background(NoktaBackground),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = LocalConfiguration.current.screenHeightDp.dp)
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
                     .padding(top = 24.dp, bottom = 20.dp),
             ) {
@@ -226,7 +225,10 @@ fun HomeContent(
             // que os cards usam.
             NoktaFooter(
                 modifier = Modifier.fillMaxWidth(),
-                appVersion = BuildConfig.VERSION_NAME,
+                // Sem sufixo de estágio (-mvp etc.) na tela — feio para o
+                // operador; o BuildConfig.VERSION_NAME completo continua
+                // disponível para diagnóstico/logs.
+                appVersion = BuildConfig.VERSION_NAME.substringBefore("-"),
             )
         }
 
