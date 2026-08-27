@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -27,6 +28,12 @@ import com.nokta.pos.ui.theme.NoktaMutedSoft
 
 private val DividerPurple = Color(0xFFB39AF0)
 private val CompanyText = Color(0xFF2E2560)
+
+// Gradiente horizontal roxo → magenta → azul da identidade Nokta (o mesmo
+// usado em destaques da marca), de ponta a ponta como divisória de seção.
+private val TopDividerGradient = Brush.horizontalGradient(
+    colors = listOf(Color(0xFF6D28D9), Color(0xFFD946EF), Color(0xFF3399FF))
+)
 
 /**
  * Rodapé institucional do app.
@@ -49,15 +56,13 @@ fun NoktaFooter(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Mesmo traço roxo curto da identidade Nokta (não uma linha cinza de
-        // borda a borda) — marca a separação do conteúdo principal sem virar
-        // moldura de card.
+        // Gradiente de ponta a ponta da identidade Nokta, separando o
+        // conteúdo principal do rodapé.
         Box(
             Modifier
-                .width(28.dp)
-                .height(2.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(DividerPurple)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(TopDividerGradient)
         )
 
         Spacer(Modifier.height(20.dp))
