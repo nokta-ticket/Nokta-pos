@@ -49,6 +49,19 @@ fun NoktaFooter(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Mesmo traço roxo curto da identidade Nokta (não uma linha cinza de
+        // borda a borda) — marca a separação do conteúdo principal sem virar
+        // moldura de card.
+        Box(
+            Modifier
+                .width(28.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(DividerPurple)
+        )
+
+        Spacer(Modifier.height(20.dp))
+
         // Trocar por Image(painterResource(R.drawable.logo_nokta)) quando o asset entrar.
         Text(
             text = "NOKTA",
