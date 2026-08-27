@@ -159,22 +159,22 @@ fun HomeContent(
                     onCashBellClick = onOpenCashWarning,
                 )
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(28.dp))
 
                 StatusRow(state = state)
 
                 if (!access.canTakePayments) {
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(20.dp))
                     PosInlineWarning(
                         "Seu perfil não registra pagamentos. Você lança itens; o fechamento é do caixa.",
                     )
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(24.dp))
 
                 NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(18.dp))
 
                 val tables: @Composable RowScope.() -> Unit = {
                     BigActionCard(
@@ -203,7 +203,7 @@ fun HomeContent(
                 }
 
                 if (access.canViewTabs) {
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(18.dp))
                     ShortcutsRow(
                         openTabsCount = state.openTabsCount,
                         onOpenTabs = onComandas,
@@ -211,9 +211,12 @@ fun HomeContent(
                     )
                 }
 
-                // Empurra a assinatura para o rodapé; com 26dp de folga mínima
-                // para telas curtas, onde o peso não sobra.
-                Spacer(Modifier.heightIn(min = 26.dp).weight(1f))
+                // Espaço flexível reduzido: o respiro entre os blocos acima já
+                // foi aumentado para usar melhor a altura da tela, então o vão
+                // antes da assinatura não precisa mais concentrar tanto vazio
+                // sozinho. min menor (16dp) porque telas curtas já ganham mais
+                // respiro dos Spacers fixos de cima.
+                Spacer(Modifier.heightIn(min = 16.dp).weight(1f))
 
                 NoktaWordmark(modifier = Modifier.fillMaxWidth())
             }
@@ -348,24 +351,24 @@ private fun Header(
                 Spacer(Modifier.width(8.dp))
             }
 
-            Column(
+            Row(
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(NoktaSurface)
-                    .border(1.dp, NoktaBorderStrong, RoundedCornerShape(14.dp))
-                    .clickable(onClick = onLogout),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+                    .border(1.dp, NoktaBorderStrong, RoundedCornerShape(12.dp))
+                    .clickable(onClick = onLogout)
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.Logout,
-                    contentDescription = "Sair",
+                    contentDescription = null,
                     tint = NoktaInkSoft,
-                    modifier = Modifier.size(19.dp),
+                    modifier = Modifier.size(16.dp),
                 )
-                Spacer(Modifier.height(2.dp))
-                Text("Sair", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
+                Spacer(Modifier.width(6.dp))
+                Text("Sair", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
             }
         }
 
@@ -396,10 +399,10 @@ private fun Header(
 private fun CashBellButton(active: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(NoktaSurface)
-            .border(1.dp, NoktaBorderStrong, RoundedCornerShape(14.dp))
+            .border(1.dp, NoktaBorderStrong, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -407,14 +410,14 @@ private fun CashBellButton(active: Boolean, onClick: () -> Unit) {
             imageVector = Icons.Outlined.Notifications,
             contentDescription = if (active) "Avisos (caixa fechado)" else "Avisos",
             tint = if (active) WarningAmber else NoktaInkSoft,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(18.dp),
         )
         if (active) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 8.dp, end = 8.dp)
-                    .size(8.dp)
+                    .padding(top = 6.dp, end = 6.dp)
+                    .size(7.dp)
                     .clip(CircleShape)
                     .background(AlertRed),
             )
