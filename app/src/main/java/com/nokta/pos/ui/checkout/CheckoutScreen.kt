@@ -188,9 +188,18 @@ private fun CheckoutContent(state: CheckoutUiState, viewModel: CheckoutViewModel
                 AmountField(amount = state.amountToCharge)
             }
 
-            (state.validation as? PartialValidation.Invalid)?.let {
-                Spacer(Modifier.height(12.dp))
-                PosInlineWarning(it.reason, tone = PosBadgeTone.DANGER)
+            // A conta já quitada (isFullyPaid) nunca mostra este aviso —
+            // depois do último pagamento, remaining vira 0 e amountToCharge
+            // também, o que tecnicamente é "inválido" para uma PRÓXIMA
+            // cobrança; mas nesse momento a tela está prestes a navegar pra
+            // fora (closeTab em andamento, ver CheckoutViewModel.register),
+            // então mostrar "Informe um valor maior que zero" seria um flash
+            // de erro sobre um pagamento que na verdade já deu certo.
+            if (!tab.isFullyPaid) {
+                (state.validation as? PartialValidation.Invalid)?.let {
+                    Spacer(Modifier.height(12.dp))
+                    PosInlineWarning(it.reason, tone = PosBadgeTone.DANGER)
+                }
             }
 
             Spacer(Modifier.height(Dim.SectionGap))
