@@ -1,14 +1,21 @@
 package com.nokta.pos.ui.mesa
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.TableRestaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,17 +25,35 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabStatus
 import com.nokta.pos.ui.components.*
 import com.nokta.pos.ui.theme.MoneyGreen
+import com.nokta.pos.ui.theme.NoktaInk
+import com.nokta.pos.ui.theme.NoktaMuted
+import com.nokta.pos.ui.theme.NoktaMutedSoft
+import com.nokta.pos.ui.theme.NoktaPurple
+import com.nokta.pos.ui.theme.NoktaPurpleBright
+import com.nokta.pos.ui.theme.NoktaSurface
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /**
  * Mesa não é uma venda — é um consumo aberto que pode receber vários
@@ -79,6 +104,31 @@ fun MesasScreen(
 
 /* ------------------------------ Central ------------------------------ */
 
+private object CentralDim {
+    val ScreenPad = 16.dp
+    val TopBarHeight = 56.dp
+    val TitleSize = 21.sp
+    val ShortcutRadius = 12.dp
+    val ShortcutHeight = 66.dp
+    val ShortcutCircle = 28.dp
+    val FieldHeight = 38.dp
+    val FieldRadius = 10.dp
+    val CardRadius = 10.dp
+    val TableIconBox = 42.dp
+}
+
+private val CentralPageBg = Color(0xFFF7F6FA)
+private val CentralShortcutBg = Color(0xFFF5F3FA)
+private val CentralIconBoxBg = Color(0xFFF1ECFB)
+private val CentralBadgeBg = Color(0xFFF1EAFD)
+private val CentralLineColor = Color(0xFFEFEDF5)
+private val CentralFieldBorder = Color(0xFFE7E4EF)
+
+/**
+ * Tela inicial de Mesas: os 2 atalhos ("Abrir mesa"/"Consultar mesa") mais a
+ * lista "Mesas em atendimento", com busca local por número/nome — não uma
+ * busca de backend nova, só filtra a lista já carregada em [MesasUiState.openTabs].
+ */
 @Composable
 private fun CentralScreen(
     state: MesasUiState,
@@ -86,49 +136,87 @@ private fun CentralScreen(
     onOpenTab: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    Scaffold(
-        topBar = { PosTopBar(title = "Mesas", onBack = onBack) },
-    ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+    var listQuery by remember { mutableStateOf("") }
+    val filteredTabs = if (listQuery.isBlank()) {
+        state.openTabs
+    } else {
+        state.openTabs.filter {
+            it.displayName.contains(listQuery, ignoreCase = true) ||
+                it.tableName?.contains(listQuery, ignoreCase = true) == true
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(CentralPageBg)) {
+        CentralTopBar(title = "Mesas", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = CentralDim.ScreenPad, end = CentralDim.ScreenPad, top = 14.dp, bottom = 24.dp),
         ) {
-            ActionCard(
-                icon = Icons.Filled.AddCircle,
-                title = "Abrir mesa",
-                description = "Iniciar um novo atendimento para uma mesa",
-                onClick = viewModel::openAbrirMesa,
-            )
-            Spacer(Modifier.height(12.dp))
-            ActionCard(
-                icon = Icons.Filled.Search,
-                title = "Consultar mesa",
-                description = "Ver o consumo de uma mesa em atendimento",
-                onClick = viewModel::openConsultarMesa,
-            )
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ShortcutCard(
+                        icon = Icons.Outlined.Add,
+                        title = "Abrir mesa",
+                        subtitle = "Iniciar um novo atendimento",
+                        onClick = viewModel::openAbrirMesa,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ShortcutCard(
+                        icon = Icons.Outlined.Search,
+                        title = "Consultar mesa",
+                        subtitle = "Ver o consumo de uma mesa",
+                        onClick = viewModel::openConsultarMesa,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
 
-            Spacer(Modifier.height(28.dp))
-            Text("Mesas em atendimento", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(18.dp))
 
-            if (state.isLoading) {
-                PosLoading(label = "Carregando mesas…")
-            } else if (state.openTabs.isEmpty()) {
-                Text(
-                    "Nenhum atendimento aberto.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 12.dp),
+                SearchField(
+                    query = listQuery,
+                    onQueryChange = { listQuery = it },
+                    placeholder = "Buscar por número da mesa",
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            } else {
-                Column {
-                    state.openTabs.forEach { tab ->
-                        TabRow(tab = tab, onClick = { onOpenTab(tab.localId) })
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+
+                Spacer(Modifier.height(28.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Mesas em atendimento",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp,
+                        color = NoktaInk,
+                    )
+                    if (!state.isLoading) CountBadge(count = filteredTabs.size)
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                if (state.isLoading) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                        PosLoading(label = "Carregando mesas…")
                     }
+                }
+            }
+
+            items(filteredTabs, key = { it.localId }) { tab ->
+                OpenTableCard(tab = tab, onClick = { onOpenTab(tab.localId) })
+                Spacer(Modifier.height(10.dp))
+            }
+
+            if (!state.isLoading && filteredTabs.isEmpty()) {
+                item {
+                    Text(
+                        text = if (state.openTabs.isEmpty()) "Nenhuma mesa em atendimento." else "Nenhuma mesa encontrada.",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                        fontSize = 12.5.sp,
+                        color = NoktaMutedSoft,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
@@ -136,26 +224,209 @@ private fun CentralScreen(
 }
 
 @Composable
-private fun ActionCard(icon: ImageVector, title: String, description: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+private fun CentralTopBar(title: String, onBack: () -> Unit) {
+    Column(Modifier.background(NoktaSurface)) {
         Row(
-            Modifier.padding(20.dp).fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(CentralDim.TopBarHeight).padding(start = 6.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(2.dp))
-                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = NoktaInk, modifier = Modifier.size(20.dp))
             }
+            Spacer(Modifier.width(6.dp))
+            Text(text = title, fontSize = CentralDim.TitleSize, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, color = NoktaInk)
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(CentralLineColor))
+    }
+}
+
+@Composable
+private fun ShortcutCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .height(CentralDim.ShortcutHeight)
+            .clip(RoundedCornerShape(CentralDim.ShortcutRadius))
+            .background(CentralShortcutBg)
+            .clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(CentralDim.ShortcutCircle).clip(CircleShape).background(NoktaPurpleBright),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NoktaInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(text = subtitle, fontSize = 11.sp, lineHeight = 15.sp, color = NoktaMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(4.dp))
+        Icon(imageVector = ChevronRightThin, contentDescription = null, tint = NoktaInk, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
+private fun SearchField(query: String, onQueryChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .height(CentralDim.FieldHeight)
+            .clip(RoundedCornerShape(CentralDim.FieldRadius))
+            .background(NoktaSurface)
+            .border(1.dp, CentralFieldBorder, RoundedCornerShape(CentralDim.FieldRadius))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(imageVector = Icons.Outlined.Search, contentDescription = null, tint = NoktaMutedSoft, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(9.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(text = placeholder, fontSize = 12.5.sp, color = NoktaMutedSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 12.5.sp, color = NoktaInk),
+                cursorBrush = SolidColor(NoktaPurple),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
+}
+
+@Composable
+private fun CountBadge(count: Int) {
+    Box(
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(CentralBadgeBg).padding(horizontal = 10.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text = if (count == 1) "1 mesa" else "$count mesas",
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = NoktaPurpleBright,
+        )
+    }
+}
+
+// openedAt vem em UTC (ISO-8601, padrão do backend) — SimpleDateFormat usa o
+// fuso horário local do aparelho por padrão, que é o certo aqui (hora do
+// operador no estabelecimento), então não fixamos TimeZone.
+private val openedAtFormat = SimpleDateFormat("HH:mm", Locale("pt", "BR"))
+
+/**
+ * Card de uma mesa em atendimento. Sem badge de status "Pago" — dentro de
+ * "Mesas em atendimento" toda mesa está, por definição, em aberto; um
+ * R$ 0,00 (mesa recém-aberta, sem item ainda) ao lado de "Pago" sugeriria
+ * uma conta já quitada, o que nunca é o caso aqui (mesa só é paga ao
+ * encerrar). Valor em cor neutra — verde fica reservado para pagamento
+ * confirmado, nunca para o total em aberto de uma mesa.
+ */
+@Composable
+private fun OpenTableCard(tab: Tab, onClick: () -> Unit) {
+    val openedAtLabel = tab.openedAt?.let {
+        runCatching { openedAtFormat.format(java.util.Date.from(java.time.Instant.parse(it))) }.getOrNull()
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(CentralDim.CardRadius))
+            .background(NoktaSurface)
+            .border(1.dp, CentralLineColor, RoundedCornerShape(CentralDim.CardRadius))
+            .clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            Box(
+                modifier = Modifier.size(CentralDim.TableIconBox).clip(RoundedCornerShape(8.dp)).background(CentralIconBoxBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(imageVector = Icons.Outlined.TableRestaurant, contentDescription = null, tint = NoktaPurpleBright, modifier = Modifier.size(20.dp))
+            }
+            if (tab.status == TabStatus.OPEN) {
+                Box(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).size(5.dp).clip(CircleShape).background(NoktaPurpleBright),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(text = tab.displayName, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = NoktaInk, maxLines = 1)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = buildString {
+                    val count = tab.activeItems.size
+                    append(if (count == 1) "1 item" else "$count itens")
+                    openedAtLabel?.let { append("  •  Aberta às "); append(it) }
+                },
+                fontSize = 11.5.sp,
+                color = NoktaMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(Modifier.width(8.dp))
+
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = tab.remaining.formatBRL(),
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.3).sp,
+                color = NoktaInk,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(5.dp))
+            when (tab.status) {
+                TabStatus.CLOSING -> StatusPill("Fechando a conta")
+                TabStatus.PAYMENT_IN_PROGRESS -> StatusPill("Recebendo pagamento")
+                // hasPartialPayment só é possível aqui com paid>0 e remaining>0 —
+                // "Pago" nunca aparece nesta lista (mesa só é quitada ao encerrar,
+                // e nesse ponto ela sai de "em atendimento").
+                else -> if (tab.hasPartialPayment) StatusPill("Pagamento parcial")
+            }
+        }
+
+        Spacer(Modifier.width(6.dp))
+
+        Icon(imageVector = ChevronRightThin, contentDescription = null, tint = NoktaMutedSoft, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
+private fun StatusPill(text: String) {
+    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(CentralBadgeBg).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text(text = text, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = NoktaPurpleBright, maxLines = 1)
+    }
+}
+
+private val ChevronRightThin: ImageVector by lazy {
+    ImageVector.Builder(name = "ChevronRightThin", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+        .apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2.2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                strokeLineMiter = 10f,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(9f, 5.5f)
+                lineTo(15.5f, 12f)
+                lineTo(9f, 18.5f)
+            }
+        }.build()
 }
 
 /* --------------------------- Abrir/Consultar --------------------------- */
@@ -308,40 +579,3 @@ private fun StatusBadgeRow(status: TabStatus) {
     }
 }
 
-/* --------------------------- Linha da lista --------------------------- */
-
-@Composable
-private fun TabRow(tab: Tab, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 76.dp)
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(tab.displayName, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "${tab.activeItems.size} ${if (tab.activeItems.size == 1) "item" else "itens"}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                tab.remaining.formatBRL(),
-                style = MaterialTheme.typography.titleMedium,
-                color = if (tab.isFullyPaid) MoneyGreen else MaterialTheme.colorScheme.onSurface,
-            )
-            when (tab.status) {
-                TabStatus.CLOSING, TabStatus.PAYMENT_IN_PROGRESS -> PosBadge("Fechando", PosBadgeTone.WARNING)
-                else -> if (tab.hasPartialPayment) {
-                    PosBadge("Parcial", PosBadgeTone.WARNING)
-                } else if (tab.isFullyPaid) {
-                    PosBadge("Pago", PosBadgeTone.SUCCESS)
-                }
-            }
-        }
-    }
-}
