@@ -14,6 +14,14 @@ data class CashStatusResponse(val isOpen: Boolean)
 data class CreateTabRequest(
     val type: String, // TABLE | INDIVIDUAL | COUNTER
     val tableId: Long? = null,
+    /**
+     * Número/nome digitado na hora pelo garçom — não existe cadastro prévio
+     * de mesa no fluxo real do POS. O backend resolve por nome (cria a mesa
+     * automaticamente se não existir) e, se a mesa já tiver comanda aberta,
+     * devolve essa comanda em vez de criar uma segunda. Exatamente um entre
+     * tableId/tableName quando type=TABLE.
+     */
+    val tableName: String? = null,
     val customerName: String? = null,
     val customerPhone: String? = null,
     val guestCount: Int? = null,

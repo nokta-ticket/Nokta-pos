@@ -9,7 +9,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -28,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabStatus
-import com.nokta.pos.comanda.domain.VenueTable
 import com.nokta.pos.ui.components.*
 import com.nokta.pos.ui.theme.MoneyGreen
 
@@ -36,8 +34,9 @@ import com.nokta.pos.ui.theme.MoneyGreen
  * Mesa não é uma venda — é um consumo aberto que pode receber vários
  * lançamentos ao longo do atendimento. Central de operação com 2 ações
  * claras ("Abrir mesa"/"Consultar mesa") e a lista "Mesas em atendimento"
- * sempre visível — nunca um mapa de salão livre/ocupado (isso é do
- * dashboard), o garçom só quer atender a mesa 12.
+ * sempre visível. Não existe cadastro prévio de mesa: o garçom digita o
+ * número que estiver na mesa física e o backend resolve/cria na hora (ver
+ * MesasViewModel).
  */
 @Composable
 fun MesasScreen(
@@ -62,8 +61,6 @@ fun MesasScreen(
             state = state,
             viewModel = viewModel,
             onOpenTab = onOpenTab,
-            emptyTabTitle = "Nenhum atendimento aberto.",
-            emptyTabAction = "Iniciar atendimento",
             occupiedTitle = "Esta mesa já possui um atendimento aberto.",
             occupiedAction = "Consultar mesa",
         )
@@ -74,8 +71,6 @@ fun MesasScreen(
             state = state,
             viewModel = viewModel,
             onOpenTab = onOpenTab,
-            emptyTabTitle = "Nenhum atendimento aberto para esta mesa.",
-            emptyTabAction = "Abrir mesa",
             occupiedTitle = null,
             occupiedAction = "Ver consumo",
         )
@@ -166,10 +161,12 @@ private fun ActionCard(icon: ImageVector, title: String, description: String, on
 /* --------------------------- Abrir/Consultar --------------------------- */
 
 /**
- * Tela de input numérico compartilhada por "Abrir mesa" e "Consultar mesa"
- * — a lógica de resolução (existe ou não atendimento aberto) é a mesma nos
- * dois casos (ver [MesasViewModel.openTable]); só o texto/ação de cada
- * estado muda conforme a intenção do garçom.
+ * Tela de input numérico compartilhada por "Abrir mesa" e "Consultar mesa".
+ * Depois de confirmar o número: se já existe uma comanda em atendimento
+ * (conhecida localmente) com este nome, mostra o consumo e deixa entrar
+ * direto — sem chamada de rede. Senão, oferece abrir uma mesa nova com esse
+ * número (o backend cria a mesa na hora, ver MesasViewModel.openByName) —
+ * nunca exige que a mesa "exista" antes.
  */
 @Composable
 private fun NumeroMesaScreen(
@@ -179,8 +176,6 @@ private fun NumeroMesaScreen(
     state: MesasUiState,
     viewModel: MesasViewModel,
     onOpenTab: (String) -> Unit,
-    emptyTabTitle: String,
-    emptyTabAction: String,
     occupiedTitle: String?,
     occupiedAction: String,
 ) {
@@ -188,29 +183,32 @@ private fun NumeroMesaScreen(
         topBar = { PosTopBar(title = title, onBack = viewModel::backToCentral) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            val confirmed = state.confirmedQuery
             when {
-                state.query.isBlank() -> NumberEntry(question = question, confirmText = confirmText, viewModel = viewModel)
-                state.tables.none { it.active } -> PosEmptyState(
-                    title = "Nenhuma mesa cadastrada",
-                    description = "As mesas são cadastradas no dashboard, em Operação › Mesas.",
-                    icon = Icons.Filled.TableRestaurant,
+                confirmed.isNullOrBlank() -> NumberEntry(
+                    question = question,
+                    confirmText = confirmText,
+                    initialValue = state.query,
+                    onConfirm = { viewModel.setQuery(it); viewModel.confirmQuery() },
                 )
-                state.matchingTable != null -> {
-                    val table = state.matchingTable!!
+                state.matchingOpenTab != null -> {
+                    val tab = state.matchingOpenTab!!
                     ResultContent(
-                        table = table,
-                        openingTableId = state.openingTableId,
-                        emptyTabTitle = emptyTabTitle,
-                        emptyTabAction = emptyTabAction,
+                        tableLabel = confirmed,
+                        occupiedTab = tab,
+                        isOpening = state.isOpening,
                         occupiedTitle = occupiedTitle,
                         occupiedAction = occupiedAction,
-                        onOpen = { viewModel.openTable(table, onOpenTab) },
+                        onOpen = { viewModel.openExisting(tab, onOpenTab) },
                     )
                 }
-                state.queryMatchesNoTable -> PosEmptyState(
-                    title = "Mesa não encontrada",
-                    description = "Nenhuma mesa corresponde a \"${state.query}\".",
-                    icon = Icons.Filled.Search,
+                else -> ResultContent(
+                    tableLabel = confirmed,
+                    occupiedTab = null,
+                    isOpening = state.isOpening,
+                    occupiedTitle = occupiedTitle,
+                    occupiedAction = occupiedAction,
+                    onOpen = { viewModel.openByName(confirmed, onOpenTab) },
                 )
             }
             state.error?.let {
@@ -221,8 +219,8 @@ private fun NumeroMesaScreen(
 }
 
 @Composable
-private fun NumberEntry(question: String, confirmText: String, viewModel: MesasViewModel) {
-    var localValue by remember { mutableStateOf("") }
+private fun NumberEntry(question: String, confirmText: String, initialValue: String, onConfirm: (String) -> Unit) {
+    var localValue by remember { mutableStateOf(initialValue) }
     Column(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -243,7 +241,7 @@ private fun NumberEntry(question: String, confirmText: String, viewModel: MesasV
         PosPrimaryButton(
             text = confirmText,
             enabled = localValue.isNotBlank(),
-            onClick = { viewModel.setQuery(localValue) },
+            onClick = { onConfirm(localValue) },
         )
     }
 }
@@ -251,37 +249,35 @@ private fun NumberEntry(question: String, confirmText: String, viewModel: MesasV
 /**
  * Resultado após informar o número — cobre os 2 estados pedidos (sem
  * consumo / já ocupada), com texto e ação dependendo se veio de "Abrir
- * mesa" ou "Consultar mesa".
+ * mesa" ou "Consultar mesa". `occupiedTab == null` significa que nenhuma
+ * comanda em atendimento é conhecida com este nome — nunca significa "mesa
+ * não existe", já que mesa não é cadastro prévio.
  */
 @Composable
 private fun ResultContent(
-    table: VenueTable,
-    openingTableId: Long?,
-    emptyTabTitle: String,
-    emptyTabAction: String,
+    tableLabel: String,
+    occupiedTab: Tab?,
+    isOpening: Boolean,
     occupiedTitle: String?,
     occupiedAction: String,
     onOpen: () -> Unit,
 ) {
-    val isOpening = openingTableId == table.id
     Column(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Mesa ${table.name}", style = MaterialTheme.typography.headlineSmall)
+        Text("Mesa $tableLabel", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
 
-        if (table.isOccupied) {
-            table.openTabStatus?.let { StatusBadgeRow(it) }
+        if (occupiedTab != null) {
+            StatusBadgeRow(occupiedTab.status)
             Spacer(Modifier.height(8.dp))
-            table.openTabRemaining?.let {
-                Text(
-                    it.formatBRL(),
-                    style = MaterialTheme.typography.displaySmall,
-                    color = if (it.isZeroOrNegative()) MoneyGreen else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            table.openTabCustomerName?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                occupiedTab.remaining.formatBRL(),
+                style = MaterialTheme.typography.displaySmall,
+                color = if (occupiedTab.remaining.isZeroOrNegative()) MoneyGreen else MaterialTheme.colorScheme.onSurface,
+            )
+            occupiedTab.customerName?.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -293,12 +289,12 @@ private fun ResultContent(
             PosPrimaryButton(text = occupiedAction, onClick = onOpen, loading = isOpening)
         } else {
             Text(
-                emptyTabTitle,
+                "Nenhum atendimento aberto para esta mesa.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
-            PosPrimaryButton(text = emptyTabAction, onClick = onOpen, loading = isOpening)
+            PosPrimaryButton(text = "Abrir mesa", onClick = onOpen, loading = isOpening)
         }
     }
 }

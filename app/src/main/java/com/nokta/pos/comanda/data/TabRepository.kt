@@ -268,7 +268,7 @@ class TabRepository @Inject constructor(
         tabDao.upsertTab(draft)
 
         val request = CreateTabRequest(
-            type = type.name, tableId = tableId, customerName = customerName,
+            type = type.name, tableId = tableId, tableName = tableName, customerName = customerName,
             customerPhone = customerPhone, guestCount = guestCount, clientRequestId = localId,
         )
         try {
