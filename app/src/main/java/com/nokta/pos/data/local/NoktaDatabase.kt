@@ -39,9 +39,14 @@ class EnumConverters {
  * ser algo que a UI consulta diretamente; ela só alimenta este banco (via
  * repositories) e o `SyncEngine` esvazia a fila de volta pra API.
  *
- * Versão 1: primeira versão do banco, projeto ainda não publicado em
- * produção com Room — sem necessidade de `Migration`, `fallbackToDestructiveMigration`
- * nunca vai apagar dado real de campo.
+ * Projeto ainda não publicado em produção com Room — sem necessidade de
+ * `Migration` real, `fallbackToDestructiveMigration` (ver DatabaseModule)
+ * nunca vai apagar dado real de campo. MAS o Room só aciona esse fallback
+ * quando detecta troca de VERSÃO — mudar uma entity (nova coluna, nova
+ * tabela) sem incrementar `version` faz o app CRASHAR ao abrir num
+ * dispositivo com o banco antigo já instalado (RoomOpenHelper.checkIdentity,
+ * "Room cannot verify the data integrity"), em vez de recriar o banco.
+ * SEMPRE incrementar `version` junto de qualquer mudança de schema aqui.
  */
 @Database(
     entities = [
@@ -58,7 +63,7 @@ class EnumConverters {
         VenueTableEntity::class,
         OutboxEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)
