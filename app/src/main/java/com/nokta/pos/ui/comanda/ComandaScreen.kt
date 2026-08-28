@@ -332,7 +332,12 @@ private fun BalanceCard(tab: Tab) {
 
         Column(Modifier.padding(18.dp).fillMaxWidth()) {
             Text(
-                text = if (tab.isFullyPaid) "QUITADA" else "FALTA PAGAR",
+                // "Quitada" só faz sentido depois de já ter havido pagamento
+                // (paid > 0) — numa mesa o consumo acontece o atendimento
+                // inteiro e só é cobrado no fim; mostrar "Quitada" com
+                // remaining=0 assim que a mesa abre (sem nenhum pagamento
+                // ainda) sugeria erroneamente que algo já tinha sido pago.
+                text = if (tab.isFullyPaid && tab.paid.isPositive()) "QUITADA" else "TOTAL DE CONSUMO",
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.6.sp,
@@ -344,7 +349,7 @@ private fun BalanceCard(tab: Tab) {
                 fontSize = 38.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-1.2).sp,
-                color = if (tab.isFullyPaid) MoneyGreen else NoktaInk,
+                color = if (tab.isFullyPaid && tab.paid.isPositive()) MoneyGreen else NoktaInk,
             )
 
             Spacer(Modifier.height(10.dp))
