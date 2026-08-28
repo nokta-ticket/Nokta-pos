@@ -51,13 +51,22 @@ class ComandaViewModel @Inject constructor(
     val state: StateFlow<ComandaUiState> = _state
 
     /**
-     * Contagem de itens ativos na última emissão observada — usada só para
-     * detectar "um pedido novo acabou de entrar" (ver observeTab) e avisar o
-     * garçom. `null` até a primeira emissão real, para nunca disparar aviso
-     * na abertura da tela (a comanda "aparecer com itens" pela primeira vez
-     * não é a mesma coisa que "itens acabaram de ser adicionados").
+     * Contagem de itens ativos na última emissão observada DEPOIS que a
+     * comanda já foi confirmada pelo menos uma vez contra o servidor (ver
+     * [hasConfirmedOnce]) — usada só para detectar "um pedido novo acabou de
+     * entrar" (ver observeTab) e avisar o garçom.
+     *
+     * `localIdForServerId`/navegação por serverId grava no Room um registro
+     * MÍNIMO (0 itens) antes do primeiro `refresh()` trazer os dados reais —
+     * o Room emite as duas versões em sequência (0 itens, depois N itens
+     * pós-sync), o que pareceria um "aumento" sem nenhum item ter sido
+     * lançado de verdade. Por isso a contagem só começa a ser rastreada
+     * depois que `refresh()` já confirmou os dados pelo menos uma vez —
+     * qualquer emissão do Room antes disso é só a comanda "aparecendo",
+     * nunca um pedido novo.
      */
     private var lastKnownActiveItemCount: Int? = null
+    private var hasConfirmedOnce = false
 
     init {
         observeTab()
@@ -67,21 +76,25 @@ class ComandaViewModel @Inject constructor(
     private fun observeTab() {
         viewModelScope.launch {
             tabRepository.observeTab(tabLocalId).collect { tab ->
-                val previousCount = lastKnownActiveItemCount
-                val currentCount = tab?.activeItems?.size
-                // Volta da tela de cardápio sem nenhum feedback de sucesso —
-                // o garçom só via a tela mudar, sem saber se o pedido
-                // realmente foi lançado. Detecta o aumento de itens (em vez
-                // de só reagir a onDone do cardápio) porque cobre também o
-                // caso de outro terminal/sync lançando pedido nesta mesma
-                // comanda enquanto ela está aberta aqui.
-                val addedMessage = if (previousCount != null && currentCount != null && currentCount > previousCount) {
-                    val added = currentCount - previousCount
-                    if (added == 1) "Item adicionado ao pedido." else "$added itens adicionados ao pedido."
+                val addedMessage = if (hasConfirmedOnce) {
+                    val previousCount = lastKnownActiveItemCount
+                    val currentCount = tab?.activeItems?.size
+                    // Volta da tela de cardápio sem nenhum feedback de sucesso —
+                    // o garçom só via a tela mudar, sem saber se o pedido
+                    // realmente foi lançado. Detecta o aumento de itens (em vez
+                    // de só reagir a onDone do cardápio) porque cobre também o
+                    // caso de outro terminal/sync lançando pedido nesta mesma
+                    // comanda enquanto ela está aberta aqui.
+                    if (previousCount != null && currentCount != null && currentCount > previousCount) {
+                        val added = currentCount - previousCount
+                        if (added == 1) "Item adicionado ao pedido." else "$added itens adicionados ao pedido."
+                    } else {
+                        null
+                    }
                 } else {
                     null
                 }
-                lastKnownActiveItemCount = currentCount
+                lastKnownActiveItemCount = tab?.activeItems?.size
 
                 _state.value = _state.value.copy(
                     tab = tab,
@@ -97,7 +110,16 @@ class ComandaViewModel @Inject constructor(
         val organizationId = authRepository.currentOrganizationId() ?: return
         viewModelScope.launch {
             runCatching { tabRepository.getTab(organizationId, tabLocalId) }
-                .onSuccess { _state.value = _state.value.copy(isLoading = false, error = null, access = authRepository.currentAccess()) }
+                .onSuccess {
+                    // Só a partir daqui a contagem de itens reflete dados
+                    // confirmados pelo servidor — ver hasConfirmedOnce acima.
+                    // Ajusta lastKnownActiveItemCount para o valor recém
+                    // confirmado (não o que a última emissão do Room possa
+                    // ter deixado, que pode ainda ser o registro mínimo).
+                    hasConfirmedOnce = true
+                    lastKnownActiveItemCount = it.activeItems.size
+                    _state.value = _state.value.copy(isLoading = false, error = null, access = authRepository.currentAccess())
+                }
                 .onFailure { e ->
                     // Erro só é bloqueante se ainda não há nada no Room para mostrar.
                     if (_state.value.tab == null) {
