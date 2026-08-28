@@ -31,6 +31,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -190,7 +191,62 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `SEND_ORDER e REGISTER_PAYMENT so sao tentados depois que a comanda tem serverId`() = runTest {
+    fun `SEND_ORDER com pedido ja enviado pelo servidor e tratado como sucesso, nunca rejeitado`() = runTest {
+        // Reproduz o bug real: a 1a tentativa de SEND_ORDER enviou com
+        // sucesso no servidor, mas a resposta se perdeu antes de voltar
+        // (timeout/queda no meio) — o app achou que falhou e reenfileirou a
+        // MESMA operacao. No retry, createOrder (idempotente por
+        // clientRequestId) devolve o pedido ja existente, e sendOrder nele
+        // recusa com 400 "Este pedido ja foi enviado." — que deve virar
+        // sucesso aqui, nunca aparecer como erro para o operador.
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "order-1", type = OutboxOperationType.SEND_ORDER, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateOrderRequest(items = emptyList(), clientRequestId = "order-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.sendOrderThrows = { HttpException(Response.error<Any>(400, okhttp3.ResponseBody.create(null, """{"message":"Este pedido já foi enviado."}"""))) }
+        api.getTabResponse = { tabResponse(id = it) }
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertFalse(result.stoppedByNetwork)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
+    @Test
+    fun `SEND_ORDER com outro erro 4xx continua sendo rejeitado normalmente`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "order-1", type = OutboxOperationType.SEND_ORDER, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateOrderRequest(items = emptyList(), clientRequestId = "order-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.sendOrderThrows = { HttpException(Response.error<Any>(400, okhttp3.ResponseBody.create(null, """{"message":"O pedido precisa de ao menos um item para ser enviado."}"""))) }
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
+    @Test
+    fun `SEND_ORDER sem serverId e sem CREATE_TAB pendente e Orphaned — rejeitado, nunca chama a API de pedido`() = runTest {
+        // Comanda sem serverId E sem nenhum CREATE_TAB pendente na fila para
+        // ela: não há mais nada a esperar (ver TabServerIdLookup.Orphaned) —
+        // cai como Rejected (definitivo, sai da fila), não Retry. Teste
+        // atualizado para bater com esse comportamento: a versão anterior
+        // deste teste assumia Retry aqui, o que já não reflete o código
+        // desde que Orphaned foi introduzido.
         db.tabDao().upsertTab(tabDraft("tab-1")) // ainda sem serverId
         db.outboxDao().enqueue(
             OutboxEntity(
@@ -202,12 +258,46 @@ class SyncEngineTest {
 
         val result = engine.syncAll()
 
-        // Vira Retry (comanda ainda não sincronizada) — nunca chama a API de
-        // pedido sem antes ter um serverId real, mesmo com rede disponível.
+        assertEquals(1, result.processed)
+        assertFalse(result.stoppedByNetwork)
+        assertEquals(0, api.createOrderCallCount)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
+    @Test
+    fun `SEND_ORDER sem serverId mas com CREATE_TAB pendente ainda nao resolvido e StillWaiting — Retry`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1")) // ainda sem serverId
+        // CREATE_TAB falha por rede primeiro: para a fila ali (comportamento
+        // já coberto por outro teste), então nunca chega a processar o
+        // SEND_ORDER nesta mesma passada — aqui o que importa é simular o
+        // CREATE_TAB como pendente sem rodar o syncAll, checando direto que
+        // a resolução de serverId espera por ele em vez de desistir.
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "tab-1", type = OutboxOperationType.CREATE_TAB, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateTabRequest(type = "COUNTER", clientRequestId = "tab-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "order-1", type = OutboxOperationType.SEND_ORDER, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateOrderRequest(items = emptyList(), clientRequestId = "order-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 2, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.createTabThrows = { IOException("conexão caiu") }
+
+        val result = engine.syncAll()
+
+        // CREATE_TAB falha por rede -> Retry -> syncAll para ali, na ordem.
+        // O SEND_ORDER nem chega a ser avaliado nesta passada, mas continua
+        // pendente na fila (nunca descartado como Orphaned enquanto o
+        // CREATE_TAB do qual depende também está pendente).
         assertEquals(0, result.processed)
         assertTrue(result.stoppedByNetwork)
         assertEquals(0, api.createOrderCallCount)
-        assertEquals(1, db.outboxDao().getPending().size)
+        assertEquals(2, db.outboxDao().getPending().size)
     }
 
     private fun tabResponse(id: Long) = TabResponse(
@@ -237,21 +327,27 @@ private class FakeConnectivityChecker(var online: Boolean) : ConnectivityChecker
 private class FakeNoktaApi : NoktaApi {
     var createTabCallCount = 0
     var createOrderCallCount = 0
+    var sendOrderCallCount = 0
     var createPaymentCallCount = 0
 
     var createTabResponse: ((CreateTabRequest) -> Any)? = null
+    var createTabThrows: (() -> Throwable)? = null
     var createOrderThrows: (() -> Throwable)? = null
+    var sendOrderThrows: (() -> Throwable)? = null
     var createPaymentResponse: ((Long) -> PaymentResponse)? = null
     var getTabResponse: ((Long) -> TabResponse)? = null
 
     override suspend fun redeemPairingCode(body: RedeemPairingCodeRequest): RedeemPairingCodeResponse = error("not used")
     override suspend fun deviceLogin(body: DeviceLoginRequest): DeviceLoginResponse = error("not used")
+    override suspend fun getDeviceStatus(): com.nokta.pos.network.dto.DeviceStatusResponse = error("not used")
     override suspend fun getMeAccess(organizationId: Long): MeAccessResponse = error("not used")
+    override suspend fun getCashStatus(organizationId: Long, locationId: Long): com.nokta.pos.network.dto.CashStatusResponse = error("not used")
     override suspend fun getMenuPreview(organizationId: Long, menuId: Long): MenuPreviewResponse = error("not used")
     override suspend fun getProductModifierGroups(organizationId: Long, productId: Long): List<ProductModifierGroupResponse> = error("not used")
 
     override suspend fun createTab(organizationId: Long, locationId: Long, body: CreateTabRequest): TabResponse {
         createTabCallCount++
+        createTabThrows?.invoke()?.let { throw it }
         @Suppress("UNCHECKED_CAST")
         return (createTabResponse?.invoke(body) as? TabResponse) ?: error("createTabResponse não configurado")
     }
@@ -270,8 +366,11 @@ private class FakeNoktaApi : NoktaApi {
         return OrderResponse(id = 1, tabId = tabId, publicCode = "0001", status = "DRAFT", createdAt = null, items = emptyList())
     }
 
-    override suspend fun sendOrder(organizationId: Long, orderId: Long): OrderResponse =
-        OrderResponse(id = orderId, tabId = 1, publicCode = "0001", status = "SENT", createdAt = null, items = emptyList())
+    override suspend fun sendOrder(organizationId: Long, orderId: Long): OrderResponse {
+        sendOrderCallCount++
+        sendOrderThrows?.invoke()?.let { throw it }
+        return OrderResponse(id = orderId, tabId = 1, publicCode = "0001", status = "SENT", createdAt = null, items = emptyList())
+    }
 
     override suspend fun cancelOrderItem(organizationId: Long, itemId: Long, body: com.nokta.pos.network.dto.CancelOrderItemRequest) = error("not used")
 

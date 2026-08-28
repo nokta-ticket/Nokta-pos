@@ -25,6 +25,7 @@ import com.nokta.pos.data.local.entity.TabPaymentEntity
 import com.nokta.pos.data.local.entity.TabWithItemsAndPayments
 import com.nokta.pos.data.local.entity.VenueTableEntity
 import com.nokta.pos.network.NoktaApi
+import com.nokta.pos.network.ORDER_ALREADY_SENT_MESSAGE
 import com.nokta.pos.network.dto.CreateOrderItemRequest
 import com.nokta.pos.network.dto.CreateOrderRequest
 import com.nokta.pos.network.dto.CreatePaymentRequest
@@ -32,12 +33,14 @@ import com.nokta.pos.network.dto.CreateTabRequest
 import com.nokta.pos.network.dto.OrderItemModifierRequest
 import com.nokta.pos.network.dto.TabResponse
 import com.nokta.pos.network.dto.TableResponse
+import com.nokta.pos.network.humanizedApiMessage
 import com.nokta.pos.sync.SyncEngine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 import java.io.IOException
 import java.util.UUID
 import javax.inject.Inject
@@ -360,7 +363,15 @@ class TabRepository @Inject constructor(
         }
         try {
             val order = api.createOrder(organizationId, serverId, request)
-            api.sendOrder(organizationId, order.id)
+            try {
+                api.sendOrder(organizationId, order.id)
+            } catch (e: HttpException) {
+                // `createOrder` é idempotente (clientRequestId) e pode devolver
+                // um pedido que uma tentativa anterior já enviou com sucesso —
+                // reenviar recusa com 400 "já foi enviado", que aqui significa
+                // "o pedido já está no estado certo", não uma falha real.
+                if (e.code() !in 400..499 || e.humanizedApiMessage() != ORDER_ALREADY_SENT_MESSAGE) throw e
+            }
             refreshFromServer(organizationId, tabLocalId, serverId)
         } catch (e: IOException) {
             enqueueSubmitOrder(organizationId, tabLocalId, orderLocalId, request)

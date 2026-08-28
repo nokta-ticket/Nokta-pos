@@ -16,6 +16,17 @@ private data class ApiErrorBody(
 private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
 /**
+ * Mensagem exata devolvida por `POST venue-orders/:id/send` (backend,
+ * `VenueOrdersService.send`) quando o pedido já saiu de DRAFT. Diferente de
+ * `createOrder` (idempotente por `clientRequestId`), `sendOrder` não é
+ * idempotente — reenviar um pedido já enviado sempre recusa com 400. Quem
+ * chama `createOrder`+`sendOrder` em sequência (SyncEngine, TabRepository)
+ * precisa tratar esse 400 específico como sucesso (o pedido já está
+ * enviado de verdade), nunca como falha visível ao operador.
+ */
+const val ORDER_ALREADY_SENT_MESSAGE = "Este pedido já foi enviado."
+
+/**
  * `HttpException.message()` do Retrofit é só "HTTP 400"/"Bad Request" — nunca
  * o motivo real. O backend (NestJS) sempre devolve o motivo de verdade no
  * corpo (`{"message": "..."}`, às vezes uma lista de erros de validação em

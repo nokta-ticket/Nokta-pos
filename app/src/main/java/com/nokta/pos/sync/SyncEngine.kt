@@ -11,6 +11,7 @@ import com.nokta.pos.network.NoktaApi
 import com.nokta.pos.network.dto.CreateOrderRequest
 import com.nokta.pos.network.dto.CreatePaymentRequest
 import com.nokta.pos.network.dto.CreateTabRequest
+import com.nokta.pos.network.ORDER_ALREADY_SENT_MESSAGE
 import com.nokta.pos.network.humanizedApiMessage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -151,8 +152,23 @@ class SyncEngine @Inject constructor(
                 val request = json.decodeFromString<CreateOrderRequest>(operation.payloadJson)
                 when (val serverId = resolveTabServerIdOrWaitReason(operation.tabLocalId)) {
                     is TabServerIdLookup.Resolved -> {
+                        // `createOrder` é idempotente por `clientRequestId` (o
+                        // backend devolve o pedido já existente em retry), mas
+                        // `sendOrder` não é: um pedido fora de DRAFT sempre
+                        // recusa com 400 "Este pedido já foi enviado.". Isso
+                        // acontece quando a 1ª tentativa enviou com sucesso no
+                        // servidor mas a resposta se perdeu antes de chegar
+                        // aqui (timeout/queda no meio) — o app achou que
+                        // falhou e reenfileirou o mesmo SEND_ORDER. Tratar
+                        // esse 400 específico como sucesso é o que garante a
+                        // idempotência de ponta a ponta prometida no
+                        // cabeçalho deste arquivo.
                         val order = api.createOrder(operation.organizationId, serverId.value, request)
-                        api.sendOrder(operation.organizationId, order.id)
+                        try {
+                            api.sendOrder(operation.organizationId, order.id)
+                        } catch (e: HttpException) {
+                            if (e.code() !in 400..499 || e.humanizedApiMessage() != ORDER_ALREADY_SENT_MESSAGE) throw e
+                        }
                         refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId.value)
                         StepOutcome.Success
                     }
