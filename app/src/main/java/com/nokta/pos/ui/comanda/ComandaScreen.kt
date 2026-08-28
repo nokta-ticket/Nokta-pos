@@ -1,36 +1,112 @@
 package com.nokta.pos.ui.comanda
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.nokta.pos.comanda.domain.OrderItemStatus
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabItem
 import com.nokta.pos.comanda.domain.TabPayment
-import com.nokta.pos.ui.components.*
+import com.nokta.pos.comanda.domain.TabStatus
+import com.nokta.pos.ui.components.PosBadge
+import com.nokta.pos.ui.components.PosBadgeTone
+import com.nokta.pos.ui.components.PosEmptyState
+import com.nokta.pos.ui.components.PosInlineWarning
+import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.theme.MoneyGreen
+import com.nokta.pos.ui.theme.NoktaInk
+import com.nokta.pos.ui.theme.NoktaMuted
+import com.nokta.pos.ui.theme.NoktaMutedSoft
+import com.nokta.pos.ui.theme.NoktaPurple
+import com.nokta.pos.ui.theme.NoktaPurpleBright
+import com.nokta.pos.ui.theme.NoktaSurface
+
+/* =========================================================================
+ *  AJUSTES RÁPIDOS — mexa só aqui para calibrar a tela
+ * ========================================================================= */
+private object Dim {
+    val ScreenPad = 16.dp
+    val CardRadius = 10.dp
+    val FieldRadius = 10.dp
+    val ButtonRadius = 10.dp
+
+    val QtyColumn = 40.dp
+    val UnitColumn = 68.dp
+    val TotalColumn = 74.dp
+    val ActionColumn = 30.dp
+
+    val RowPadH = 14.dp
+    val BottomBarHeight = 54.dp
+}
+
+private val PageGray = Color(0xFFF5F4F8)
+private val TableHeaderBg = Color(0xFFF7F6FA)
+private val LineColor = Color(0xFFEFEDF5)
+private val FieldBorder = Color(0xFFE7E4EF)
 
 /**
  * Comanda/mesa aberta: quem é, o que consumiu, quanto pagou, quanto falta.
  *
  * O saldo restante é o número maior da tela porque é ele que decide a próxima
  * ação do garçom. Itens pendentes de preparo aparecem com o status ao lado —
- * informativo, nunca impedindo cobrar (item 14).
+ * informativo, nunca impedindo cobrar (item 14). Busca filtra só a lista já
+ * carregada (client-side, por nome do produto) — não é uma feature de
+ * backend nova, só ajuda a achar um item numa comanda grande.
  */
 @Composable
 fun ComandaScreen(
@@ -41,57 +117,47 @@ fun ComandaScreen(
     viewModel: ComandaViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    var query by remember { mutableStateOf("") }
 
     LaunchedEffect(state.closed) { if (state.closed) onBack() }
 
-    Scaffold(
-        topBar = {
-            PosTopBar(
-                title = state.tab?.displayName ?: "Comanda",
-                subtitle = state.tab?.customerName,
-                onBack = onBack,
-            )
-        },
-        bottomBar = {
-            state.tab?.let { tab ->
-                ComandaActionBar(
-                    tab = tab,
-                    canAddItems = state.access.canCreateOrders,
-                    canTakePayments = state.access.canTakePayments,
-                    isClosing = state.isClosing,
-                    onAddProducts = onAddProducts,
-                    onCheckout = onCheckout,
-                    onCloseTab = viewModel::closeTab,
-                    onRequestClose = viewModel::requestClose,
-                    onCancelClose = viewModel::cancelClose,
-                )
+    Box(Modifier.fillMaxSize().background(NoktaSurface)) {
+        when {
+            state.isLoading && state.tab == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                PosLoading(label = "Carregando comanda…")
             }
-        },
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when {
-                state.isLoading && state.tab == null -> PosLoading(label = "Carregando comanda…")
-                state.error != null && state.tab == null -> PosEmptyState(
+            state.error != null && state.tab == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                PosEmptyState(
                     title = "Não foi possível abrir",
                     description = state.error!!,
                     actionText = "Tentar de novo",
                     onAction = viewModel::refresh,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                state.tab != null -> ComandaContent(
-                    tab = state.tab!!,
-                    canCancelItems = state.access.canManageTabs || state.access.canCreateOrders,
-                    onCancelItem = viewModel::askCancelItem,
-                    onRemoveDraftItem = viewModel::removeDraftItem,
                 )
             }
+            state.tab != null -> ComandaContent(
+                tab = state.tab!!,
+                query = query,
+                onQueryChange = { query = it },
+                canAddItems = state.access.canCreateOrders,
+                canTakePayments = state.access.canTakePayments,
+                canCancelItems = state.access.canManageTabs || state.access.canCreateOrders,
+                isClosing = state.isClosing,
+                onCancelItem = viewModel::askCancelItem,
+                onRemoveDraftItem = viewModel::removeDraftItem,
+                onAddProducts = onAddProducts,
+                onCheckout = onCheckout,
+                onCloseTab = viewModel::closeTab,
+                onRequestClose = viewModel::requestClose,
+                onCancelClose = viewModel::cancelClose,
+                onBack = onBack,
+            )
+        }
 
-            state.actionMessage?.let {
-                Snackbar(
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                    action = { TextButton(onClick = viewModel::clearActionMessage) { Text("Ok") } },
-                ) { Text(it) }
-            }
+        state.actionMessage?.let {
+            Snackbar(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                action = { TextButton(onClick = viewModel::clearActionMessage) { Text("Ok") } },
+            ) { Text(it) }
         }
     }
 
@@ -108,170 +174,359 @@ fun ComandaScreen(
 @Composable
 private fun ComandaContent(
     tab: Tab,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    canAddItems: Boolean,
+    canTakePayments: Boolean,
     canCancelItems: Boolean,
+    isClosing: Boolean,
     onCancelItem: (TabItem) -> Unit,
     onRemoveDraftItem: (TabItem) -> Unit,
+    onAddProducts: () -> Unit,
+    onCheckout: () -> Unit,
+    onCloseTab: () -> Unit,
+    onRequestClose: () -> Unit,
+    onCancelClose: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-    ) {
-        Spacer(Modifier.height(8.dp))
-        BalanceCard(tab)
+    val filteredItems = if (query.isBlank()) {
+        tab.items
+    } else {
+        tab.items.filter { it.productName.contains(query, ignoreCase = true) }
+    }
+    val activePayments = tab.payments.filterNot { it.isCanceled }
 
-        when (tab.status) {
-            com.nokta.pos.comanda.domain.TabStatus.CLOSING -> {
-                Spacer(Modifier.height(12.dp))
-                PosInlineWarning("Fechando a conta — consumo travado, ainda sem pagamento registrado.")
+    Column(Modifier.fillMaxSize()) {
+        TopBar(title = tab.displayName, subtitle = tab.customerName, onBack = onBack)
+
+        Column(Modifier.padding(horizontal = Dim.ScreenPad)) {
+            BalanceCard(tab)
+
+            when (tab.status) {
+                TabStatus.CLOSING -> {
+                    Spacer(Modifier.height(12.dp))
+                    PosInlineWarning("Fechando a conta — consumo travado, ainda sem pagamento registrado.")
+                }
+                TabStatus.PAYMENT_IN_PROGRESS -> {
+                    Spacer(Modifier.height(12.dp))
+                    PosInlineWarning("Recebendo pagamento — consumo travado até quitar ou cancelar o pagamento.")
+                }
+                else -> Unit
             }
-            com.nokta.pos.comanda.domain.TabStatus.PAYMENT_IN_PROGRESS -> {
+
+            if (tab.pendingItemCount > 0) {
                 Spacer(Modifier.height(12.dp))
-                PosInlineWarning("Recebendo pagamento — consumo travado até quitar ou cancelar o pagamento.")
-            }
-            else -> Unit
-        }
-
-        if (tab.pendingItemCount > 0) {
-            Spacer(Modifier.height(12.dp))
-            PosInlineWarning(
-                "${tab.pendingItemCount} ${if (tab.pendingItemCount == 1) "item ainda não entregue" else "itens ainda não entregues"} — " +
-                    "isso não impede o pagamento.",
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Text("Consumo", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-
-        if (tab.items.isEmpty()) {
-            Text(
-                "Nenhum item lançado ainda.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 16.dp),
-            )
-        } else {
-            tab.items.forEach { item ->
-                ItemRow(
-                    item = item,
-                    canCancel = canCancelItems && !item.status.isCanceled,
-                    onCancel = {
-                        if (item.canRemoveAsDraft) onRemoveDraftItem(item) else onCancelItem(item)
-                    },
+                PosInlineWarning(
+                    "${tab.pendingItemCount} ${if (tab.pendingItemCount == 1) "item ainda não entregue" else "itens ainda não entregues"} — " +
+                        "isso não impede o pagamento.",
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+            }
+
+            Spacer(Modifier.height(12.dp))
+            SearchField(query = query, onQueryChange = onQueryChange, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(12.dp))
+        }
+
+        // ---------- Consumo ----------
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = Dim.ScreenPad)
+                .clip(RoundedCornerShape(Dim.CardRadius))
+                .border(1.dp, LineColor, RoundedCornerShape(Dim.CardRadius)),
+        ) {
+            ConsumptionHeader()
+
+            if (filteredItems.isEmpty()) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (tab.items.isEmpty()) "Nenhum item lançado ainda." else "Nenhum item encontrado.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NoktaMutedSoft,
+                    )
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f, fill = false)) {
+                    items(filteredItems, key = { it.id }) { item ->
+                        Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = Dim.RowPadH).background(LineColor))
+                        ItemRow(
+                            item = item,
+                            canCancel = canCancelItems && !item.status.isCanceled,
+                            onCancel = { if (item.canRemoveAsDraft) onRemoveDraftItem(item) else onCancelItem(item) },
+                        )
+                    }
+                }
+            }
+
+            if (activePayments.isNotEmpty()) {
+                Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = Dim.RowPadH).background(LineColor))
+                Column(Modifier.padding(horizontal = Dim.RowPadH, vertical = 12.dp)) {
+                    Text("Pagamentos", style = MaterialTheme.typography.titleMedium, color = NoktaInk)
+                    activePayments.forEach { PaymentRow(it) }
+                }
             }
         }
 
-        val activePayments = tab.payments.filterNot { it.isCanceled }
-        if (activePayments.isNotEmpty()) {
-            Spacer(Modifier.height(24.dp))
-            Text("Pagamentos", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
-            activePayments.forEach { PaymentRow(it) }
-        }
+        Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(120.dp))
+        BottomActions(
+            tab = tab,
+            canAddItems = canAddItems,
+            canTakePayments = canTakePayments,
+            isClosing = isClosing,
+            onAddProducts = onAddProducts,
+            onCheckout = onCheckout,
+            onCloseTab = onCloseTab,
+            onRequestClose = onRequestClose,
+            onCancelClose = onCancelClose,
+        )
     }
 }
 
-/** Cartão de saldo: total, pago e o que falta — o resumo que o garçom lê primeiro. */
+/* ------------------------------ Top bar ----------------------------- */
+
+@Composable
+private fun TopBar(title: String, subtitle: String?, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = NoktaInk, modifier = Modifier.size(24.dp))
+        }
+
+        Spacer(Modifier.width(6.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp,
+                color = NoktaInk,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            subtitle?.takeIf { it.isNotBlank() }?.let {
+                Text(it, fontSize = 13.sp, color = NoktaMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/* ---------------------------- Card do total ------------------------- */
+
 @Composable
 private fun BalanceCard(tab: Tab) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth(),
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .clip(RoundedCornerShape(Dim.CardRadius))
+            .background(PageGray),
     ) {
-        Column(Modifier.padding(18.dp)) {
-            MoneyRow("Total", tab.total)
-            if (tab.discount.isPositive()) {
-                Spacer(Modifier.height(6.dp))
-                MoneyRow("Desconto", tab.discount)
-            }
-            if (tab.serviceCharge.isPositive()) {
-                Spacer(Modifier.height(6.dp))
-                MoneyRow("Serviço", tab.serviceCharge)
-            }
-            if (tab.paid.isPositive()) {
-                Spacer(Modifier.height(6.dp))
-                MoneyRow("Pago", tab.paid, positive = true)
-            }
+        Box(Modifier.width(4.dp).fillMaxHeight().background(NoktaPurpleBright))
+
+        Column(Modifier.padding(18.dp).fillMaxWidth()) {
+            Text(
+                text = if (tab.isFullyPaid) "QUITADA" else "FALTA PAGAR",
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 1.6.sp,
+                color = NoktaMuted,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = tab.remaining.formatBRL(),
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-1.2).sp,
+                color = if (tab.isFullyPaid) MoneyGreen else NoktaInk,
+            )
+
             Spacer(Modifier.height(10.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(10.dp))
-            MoneyRow(
-                if (tab.isFullyPaid) "Quitada" else "Falta pagar",
-                tab.remaining,
-                emphasized = true,
-                positive = tab.isFullyPaid,
+
+            MoneyLine("Total", tab.total.formatBRL())
+            if (tab.discount.isPositive()) MoneyLine("Desconto", tab.discount.formatBRL())
+            if (tab.serviceCharge.isPositive()) MoneyLine("Serviço", tab.serviceCharge.formatBRL())
+            if (tab.paid.isPositive()) MoneyLine("Pago", tab.paid.formatBRL(), color = MoneyGreen)
+
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.FormatListBulleted,
+                    contentDescription = null,
+                    tint = NoktaPurpleBright,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                val count = tab.activeItems.size
+                Text(
+                    text = if (count == 1) "1 item" else "$count itens",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NoktaPurpleBright,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoneyLine(label: String, value: String, color: Color = NoktaMuted) {
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = 13.sp, color = NoktaMuted)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = color)
+    }
+}
+
+/* ------------------------------- Busca ------------------------------ */
+
+@Composable
+private fun SearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(Dim.FieldRadius))
+            .background(NoktaSurface)
+            .border(1.dp, FieldBorder, RoundedCornerShape(Dim.FieldRadius))
+            .padding(horizontal = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Search, contentDescription = null, tint = NoktaMutedSoft, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text("Buscar no consumo", fontSize = 14.sp, color = NoktaMutedSoft, maxLines = 1)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 14.sp, color = NoktaInk),
+                cursorBrush = SolidColor(NoktaPurple),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
+}
+
+/* ------------------------------ Tabela ------------------------------ */
+
+@Composable
+private fun ConsumptionHeader() {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(TableHeaderBg).padding(horizontal = Dim.RowPadH, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HeaderLabel("ITEM", Modifier.weight(1f), TextAlign.Start)
+        HeaderLabel("QTD.", Modifier.width(Dim.QtyColumn), TextAlign.Center)
+        HeaderLabel("UNIT.", Modifier.width(Dim.UnitColumn), TextAlign.End)
+        HeaderLabel("TOTAL", Modifier.width(Dim.TotalColumn), TextAlign.End)
+        Spacer(Modifier.width(Dim.ActionColumn))
+    }
+}
+
+@Composable
+private fun HeaderLabel(text: String, modifier: Modifier, align: TextAlign) {
+    Text(
+        text = text,
+        modifier = modifier,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.8.sp,
+        color = NoktaMuted,
+        textAlign = align,
+        maxLines = 1,
+    )
 }
 
 @Composable
 private fun ItemRow(item: TabItem, canCancel: Boolean, onCancel: () -> Unit) {
     val canceled = item.status.isCanceled
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().background(NoktaSurface).padding(horizontal = Dim.RowPadH, vertical = 13.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text(
-            "${item.quantity}x",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.width(38.dp),
-            color = if (canceled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-        )
         Column(Modifier.weight(1f)) {
             Text(
-                item.productName,
-                style = MaterialTheme.typography.bodyLarge,
+                text = item.productName,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (canceled) NoktaMutedSoft else NoktaInk,
                 textDecoration = if (canceled) TextDecoration.LineThrough else null,
-                color = if (canceled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (item.variantName.isNotBlank() && item.variantName != item.productName) {
-                Text(
-                    item.variantName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(item.variantName, fontSize = 12.sp, color = NoktaMutedSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             // Adicionais e observação: é aqui que vive "8 tradicionais e 2
             // melancia". Sem isto o pedido chega incompleto na cozinha.
             item.detailLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(it, fontSize = 12.sp, color = NoktaMutedSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PosBadge(
-                    item.status.label,
-                    when {
-                        canceled -> PosBadgeTone.DANGER
-                        item.status.isDelivered -> PosBadgeTone.SUCCESS
-                        else -> PosBadgeTone.NEUTRAL
-                    },
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                item.lineTotal.formatBRL(),
-                style = MaterialTheme.typography.titleMedium,
-                textDecoration = if (canceled) TextDecoration.LineThrough else null,
-                color = if (canceled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            PosBadge(
+                item.status.label,
+                when {
+                    canceled -> PosBadgeTone.DANGER
+                    item.status.isDelivered -> PosBadgeTone.SUCCESS
+                    else -> PosBadgeTone.NEUTRAL
+                },
             )
+        }
+
+        Text(
+            text = item.quantity.toString(),
+            modifier = Modifier.width(Dim.QtyColumn),
+            fontSize = 14.sp,
+            color = NoktaInk,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+        )
+
+        Text(
+            text = item.unitPrice.formatBRL(),
+            modifier = Modifier.width(Dim.UnitColumn),
+            fontSize = 12.5.sp,
+            color = NoktaMuted,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
+
+        Text(
+            text = item.lineTotal.formatBRL(),
+            modifier = Modifier.width(Dim.TotalColumn),
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (canceled) NoktaMutedSoft else NoktaInk,
+            textDecoration = if (canceled) TextDecoration.LineThrough else null,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
+
+        Box(
+            modifier = Modifier.width(Dim.ActionColumn),
+            contentAlignment = Alignment.TopCenter,
+        ) {
             if (canCancel) {
-                TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    // Remover (rascunho, sem motivo) e Cancelar (já lançado,
-                    // motivo obrigatório) são ações diferentes — o rótulo
-                    // precisa deixar isso óbvio antes do toque, não só o
-                    // dialog que abre depois.
-                    Text(if (item.canRemoveAsDraft) "Remover" else "Cancelar")
+                Box(
+                    modifier = Modifier.size(26.dp).clip(CircleShape).clickable(onClick = onCancel),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        // Remover (rascunho, sem motivo) e Cancelar (já
+                        // lançado, motivo obrigatório) são ações diferentes —
+                        // o rótulo do dialog já deixa isso claro.
+                        contentDescription = if (item.canRemoveAsDraft) "Remover" else "Cancelar",
+                        tint = NoktaPurpleBright,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
         }
@@ -281,32 +536,25 @@ private fun ItemRow(item: TabItem, canCancel: Boolean, onCancel: () -> Unit) {
 @Composable
 private fun PaymentRow(payment: TabPayment) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Filled.Payments,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MoneyGreen,
-        )
-        Spacer(Modifier.width(12.dp))
+        Icon(Icons.Filled.Payments, contentDescription = null, modifier = Modifier.size(18.dp), tint = MoneyGreen)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(payment.method.label, style = MaterialTheme.typography.bodyLarge)
+            Text(payment.method.label, fontSize = 14.sp, color = NoktaInk)
             payment.change?.takeIf { it.isPositive() }?.let {
-                Text(
-                    "Troco ${it.formatBRL()}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text("Troco ${it.formatBRL()}", fontSize = 12.sp, color = NoktaMutedSoft)
             }
         }
-        Text(payment.amount.formatBRL(), style = MaterialTheme.typography.titleMedium, color = MoneyGreen)
+        Text(payment.amount.formatBRL(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MoneyGreen)
     }
 }
 
+/* --------------------------- Ações inferiores ------------------------ */
+
 @Composable
-private fun ComandaActionBar(
+private fun BottomActions(
     tab: Tab,
     canAddItems: Boolean,
     canTakePayments: Boolean,
@@ -317,42 +565,119 @@ private fun ComandaActionBar(
     onRequestClose: () -> Unit,
     onCancelClose: () -> Unit,
 ) {
-    Surface(shadowElevation = 8.dp) {
-        Column(Modifier.padding(16.dp)) {
-            when {
-                // Quitada (mesmo se já passou por "fechar a conta" explícito
-                // — PAYMENT_IN_PROGRESS/CLOSING): só falta encerrar e liberar
-                // a mesa.
-                tab.isFullyPaid && tab.isOccupying -> PosPrimaryButton(
-                    text = "Encerrar comanda",
-                    onClick = onCloseTab,
-                    loading = isClosing,
-                )
-                canTakePayments -> PosPrimaryButton(
-                    text = "Pagar ${tab.remaining.formatBRL()}",
-                    onClick = onCheckout,
-                    icon = Icons.Filled.Payments,
-                )
-                else -> PosInlineWarning("Seu perfil não registra pagamentos. Chame o caixa para fechar.")
-            }
+    Column(Modifier.fillMaxWidth().background(NoktaSurface).padding(horizontal = Dim.ScreenPad)) {
+        if (tab.status == TabStatus.CLOSING) {
+            SecondaryActionRow(text = "CANCELAR FECHAMENTO", onClick = onCancelClose)
+            Spacer(Modifier.height(10.dp))
+        }
+
+        // "Fechar a conta" é opcional (ver ComandaViewModel.requestClose) —
+        // trava o consumo antes de cobrar, útil para o cliente ver o total
+        // fechado antes de decidir a forma de pagamento. Cobrar direto sem
+        // passar por aqui continua funcionando (botão principal abaixo).
+        if (canTakePayments && tab.isEditable && !tab.isFullyPaid) {
+            SecondaryActionRow(text = "FECHAR A CONTA", onClick = onRequestClose)
+            Spacer(Modifier.height(10.dp))
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 14.dp),
+        ) {
             if (canAddItems && tab.isEditable) {
-                Spacer(Modifier.height(10.dp))
-                PosSecondaryButton(text = "Adicionar itens", onClick = onAddProducts, icon = Icons.Filled.Add)
+                Row(
+                    modifier = Modifier
+                        .weight(0.44f)
+                        .height(Dim.BottomBarHeight)
+                        .clip(RoundedCornerShape(Dim.ButtonRadius))
+                        .background(NoktaSurface)
+                        .border(1.dp, NoktaPurpleBright, RoundedCornerShape(Dim.ButtonRadius))
+                        .clickable(onClick = onAddProducts)
+                        .padding(horizontal = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, tint = NoktaPurpleBright, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = "ADICIONAR ITENS",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.2.sp,
+                        color = NoktaPurpleBright,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Visible,
+                    )
+                }
             }
-            // "Fechar a conta" é opcional (ver ComandaViewModel.requestClose)
-            // — trava o consumo antes de cobrar, útil para o cliente ver o
-            // total fechado antes de decidir a forma de pagamento. Cobrar
-            // direto sem passar por aqui (botão "Pagar" acima) continua
-            // funcionando normalmente.
-            if (canTakePayments && tab.isEditable && !tab.isFullyPaid) {
-                Spacer(Modifier.height(10.dp))
-                PosSecondaryButton(text = "Fechar a conta", onClick = onRequestClose)
-            }
-            if (tab.status == com.nokta.pos.comanda.domain.TabStatus.CLOSING) {
-                Spacer(Modifier.height(10.dp))
-                PosSecondaryButton(text = "Cancelar fechamento", onClick = onCancelClose)
+
+            val primaryWeight = if (canAddItems && tab.isEditable) 0.56f else 1f
+            when {
+                tab.isFullyPaid && tab.isOccupying -> PrimaryActionBox(
+                    modifier = Modifier.weight(primaryWeight),
+                    text = "ENCERRAR COMANDA",
+                    enabled = !isClosing,
+                    onClick = onCloseTab,
+                )
+                canTakePayments -> PrimaryActionBox(
+                    modifier = Modifier.weight(primaryWeight),
+                    text = "PAGAR • ${tab.remaining.formatBRL()}",
+                    onClick = onCheckout,
+                )
+                else -> Box(Modifier.weight(primaryWeight).height(Dim.BottomBarHeight), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Chame o caixa para fechar",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = NoktaMutedSoft,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SecondaryActionRow(text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Dim.BottomBarHeight)
+            .clip(RoundedCornerShape(Dim.ButtonRadius))
+            .background(NoktaSurface)
+            .border(1.dp, FieldBorder, RoundedCornerShape(Dim.ButtonRadius))
+            .clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp, color = NoktaInk)
+    }
+}
+
+@Composable
+private fun PrimaryActionBox(modifier: Modifier = Modifier, text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .height(Dim.BottomBarHeight)
+            .clip(RoundedCornerShape(Dim.ButtonRadius))
+            .background(if (enabled) NoktaPurpleBright else NoktaMutedSoft)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.2.sp,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible,
+        )
     }
 }
 
