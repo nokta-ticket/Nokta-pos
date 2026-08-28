@@ -50,6 +50,15 @@ class ComandaViewModel @Inject constructor(
     private val _state = MutableStateFlow(ComandaUiState(access = authRepository.currentAccess()))
     val state: StateFlow<ComandaUiState> = _state
 
+    /**
+     * Contagem de itens ativos na última emissão observada — usada só para
+     * detectar "um pedido novo acabou de entrar" (ver observeTab) e avisar o
+     * garçom. `null` até a primeira emissão real, para nunca disparar aviso
+     * na abertura da tela (a comanda "aparecer com itens" pela primeira vez
+     * não é a mesma coisa que "itens acabaram de ser adicionados").
+     */
+    private var lastKnownActiveItemCount: Int? = null
+
     init {
         observeTab()
         refresh()
@@ -58,7 +67,27 @@ class ComandaViewModel @Inject constructor(
     private fun observeTab() {
         viewModelScope.launch {
             tabRepository.observeTab(tabLocalId).collect { tab ->
-                _state.value = _state.value.copy(tab = tab, isLoading = tab == null && _state.value.error == null)
+                val previousCount = lastKnownActiveItemCount
+                val currentCount = tab?.activeItems?.size
+                // Volta da tela de cardápio sem nenhum feedback de sucesso —
+                // o garçom só via a tela mudar, sem saber se o pedido
+                // realmente foi lançado. Detecta o aumento de itens (em vez
+                // de só reagir a onDone do cardápio) porque cobre também o
+                // caso de outro terminal/sync lançando pedido nesta mesma
+                // comanda enquanto ela está aberta aqui.
+                val addedMessage = if (previousCount != null && currentCount != null && currentCount > previousCount) {
+                    val added = currentCount - previousCount
+                    if (added == 1) "Item adicionado ao pedido." else "$added itens adicionados ao pedido."
+                } else {
+                    null
+                }
+                lastKnownActiveItemCount = currentCount
+
+                _state.value = _state.value.copy(
+                    tab = tab,
+                    isLoading = tab == null && _state.value.error == null,
+                    actionMessage = addedMessage ?: _state.value.actionMessage,
+                )
             }
         }
     }

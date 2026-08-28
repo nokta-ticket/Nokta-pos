@@ -63,6 +63,7 @@ import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabItem
 import com.nokta.pos.comanda.domain.TabPayment
 import com.nokta.pos.comanda.domain.TabStatus
+import com.nokta.pos.comanda.domain.TabType
 import com.nokta.pos.ui.components.PosBadge
 import com.nokta.pos.ui.components.PosBadgeTone
 import com.nokta.pos.ui.components.PosEmptyState
@@ -212,14 +213,6 @@ private fun ComandaContent(
                     PosInlineWarning("Recebendo pagamento — consumo travado até quitar ou cancelar o pagamento.")
                 }
                 else -> Unit
-            }
-
-            if (tab.pendingItemCount > 0) {
-                Spacer(Modifier.height(12.dp))
-                PosInlineWarning(
-                    "${tab.pendingItemCount} ${if (tab.pendingItemCount == 1) "item ainda não entregue" else "itens ainda não entregues"} — " +
-                        "isso não impede o pagamento.",
-                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -570,16 +563,25 @@ private fun BottomActions(
     onRequestClose: () -> Unit,
     onCancelClose: () -> Unit,
 ) {
+    // Mesa (TabType.TABLE) só cobra depois de "fechar a conta" — o consumo
+    // acontece o atendimento inteiro e o pagamento é sempre o passo final,
+    // então mostrar "Pagar R$ X" junto de "Fechar a conta" enquanto a mesa
+    // ainda está em consumo é confuso (sugere que dá para pagar a qualquer
+    // momento). Balcão/individual (venda direta, sem esse conceito de
+    // "atendimento em andamento") continuam cobrando direto, sem essa etapa.
+    val hidePayWhileOpen = tab.type == TabType.TABLE && tab.isEditable && !tab.isFullyPaid
+    val showPayButton = canTakePayments && !hidePayWhileOpen
+
     Column(Modifier.fillMaxWidth().background(NoktaSurface).padding(horizontal = Dim.ScreenPad)) {
         if (tab.status == TabStatus.CLOSING) {
             SecondaryActionRow(text = "CANCELAR FECHAMENTO", onClick = onCancelClose)
             Spacer(Modifier.height(10.dp))
         }
 
-        // "Fechar a conta" é opcional (ver ComandaViewModel.requestClose) —
-        // trava o consumo antes de cobrar, útil para o cliente ver o total
-        // fechado antes de decidir a forma de pagamento. Cobrar direto sem
-        // passar por aqui continua funcionando (botão principal abaixo).
+        // "Fechar a conta" trava o consumo (OPEN -> CLOSING) antes de cobrar.
+        // Para mesa é a única forma de chegar ao pagamento (ver
+        // requiresExplicitClose acima); para balcão/individual continua
+        // sendo opcional, já que o botão de pagar já aparece direto.
         if (canTakePayments && tab.isEditable && !tab.isFullyPaid) {
             SecondaryActionRow(text = "FECHAR A CONTA", onClick = onRequestClose)
             Spacer(Modifier.height(10.dp))
@@ -618,27 +620,35 @@ private fun BottomActions(
                 }
             }
 
-            val primaryWeight = if (canAddItems && tab.isEditable) 0.56f else 1f
-            when {
-                tab.isFullyPaid && tab.isOccupying -> PrimaryActionBox(
-                    modifier = Modifier.weight(primaryWeight),
-                    text = "ENCERRAR COMANDA",
-                    enabled = !isClosing,
-                    onClick = onCloseTab,
-                )
-                canTakePayments -> PrimaryActionBox(
-                    modifier = Modifier.weight(primaryWeight),
-                    text = "PAGAR • ${tab.remaining.formatBRL()}",
-                    onClick = onCheckout,
-                )
-                else -> Box(Modifier.weight(primaryWeight).height(Dim.BottomBarHeight), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Chame o caixa para fechar",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = NoktaMutedSoft,
-                        textAlign = TextAlign.Center,
+            // Enquanto a mesa está em consumo e só "Fechar a conta" está
+            // visível acima, a caixa principal fica de fora — ter as duas
+            // juntas ("Fechar a conta" + "Pagar") é exatamente a confusão
+            // que motivou essa mudança. Nos demais casos (balcão, mesa já
+            // fechando/quitada, ou sem permissão de cobrar) a caixa
+            // principal sempre aparece, como antes.
+            if (!hidePayWhileOpen) {
+                val primaryWeight = if (canAddItems && tab.isEditable) 0.56f else 1f
+                when {
+                    tab.isFullyPaid && tab.isOccupying -> PrimaryActionBox(
+                        modifier = Modifier.weight(primaryWeight),
+                        text = "ENCERRAR COMANDA",
+                        enabled = !isClosing,
+                        onClick = onCloseTab,
                     )
+                    showPayButton -> PrimaryActionBox(
+                        modifier = Modifier.weight(primaryWeight),
+                        text = "PAGAR • ${tab.remaining.formatBRL()}",
+                        onClick = onCheckout,
+                    )
+                    else -> Box(Modifier.weight(primaryWeight).height(Dim.BottomBarHeight), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Chame o caixa para fechar",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = NoktaMutedSoft,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         }
