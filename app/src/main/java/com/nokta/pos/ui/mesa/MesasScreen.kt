@@ -118,7 +118,6 @@ private object CentralDim {
 }
 
 private val CentralPageBg = Color(0xFFF7F6FA)
-private val CentralShortcutBg = Color(0xFFF5F3FA)
 private val CentralIconBoxBg = Color(0xFFF1ECFB)
 private val CentralBadgeBg = Color(0xFFF1EAFD)
 private val CentralLineColor = Color(0xFFEFEDF5)
@@ -249,7 +248,8 @@ private fun ShortcutCard(icon: ImageVector, title: String, subtitle: String, onC
         modifier = modifier
             .height(CentralDim.ShortcutHeight)
             .clip(RoundedCornerShape(CentralDim.ShortcutRadius))
-            .background(CentralShortcutBg)
+            .background(NoktaSurface)
+            .border(1.dp, CentralLineColor, RoundedCornerShape(CentralDim.ShortcutRadius))
             .clickable(onClick = onClick)
             .padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
