@@ -594,41 +594,40 @@ class TabRepository @Inject constructor(
     private suspend fun writeTabFromServer(response: TabResponse, localOverride: String? = null): TabWithItemsAndPayments {
         val localId = localOverride ?: tabDao.getTabByServerId(response.id)?.localId ?: UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        tabDao.upsertTab(response.toEntity().copy(localId = localId, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = now))
 
-        // Substitui itens/pagamentos locais pelos confirmados do servidor —
-        // seguro porque, a partir daqui, o servidor já viu tudo que este
-        // request representa (nunca perde uma escrita local: só rodamos isto
-        // depois de uma chamada que já incluiu as mudanças pendentes).
-        tabDao.deleteItemsForTab(localId)
-        tabDao.deletePaymentsForTab(localId)
-        val orderLocalByServerId = mutableMapOf<Long, String>()
+        val orders = mutableListOf<TabOrderEntity>()
+        val items = mutableListOf<TabItemEntity>()
         response.orders.forEach { order ->
             val orderLocalId = UUID.randomUUID().toString()
-            orderLocalByServerId[order.id] = orderLocalId
-            tabDao.upsertOrder(TabOrderEntity(localId = orderLocalId, serverId = order.id, tabLocalId = localId, status = order.status, syncState = SyncState.SYNCED, createdAtEpochMs = now))
-            tabDao.upsertItems(
-                order.items.map { item ->
-                    TabItemEntity(
-                        localId = UUID.randomUUID().toString(), serverId = item.id, tabLocalId = localId, orderLocalId = orderLocalId,
-                        menuItemId = item.productId, variantId = item.variantId, productName = item.productNameSnapshot, variantName = item.variantNameSnapshot,
-                        quantity = item.quantity, unitPriceCents = item.unitPriceCents, modifiersTotalCents = item.modifiersTotalCents, lineTotalCents = item.lineTotalCents,
-                        status = item.status, notes = item.notes,
-                        modifiersJson = json.encodeToString(item.modifiers.map { m -> PersistedModifier(name = m.optionNameSnapshot ?: "Adicional", quantity = m.quantity, totalCents = m.totalPriceCents) }),
-                        createdAtEpochMs = now,
-                    )
-                },
+            orders += TabOrderEntity(localId = orderLocalId, serverId = order.id, tabLocalId = localId, status = order.status, syncState = SyncState.SYNCED, createdAtEpochMs = now)
+            items += order.items.map { item ->
+                TabItemEntity(
+                    localId = UUID.randomUUID().toString(), serverId = item.id, tabLocalId = localId, orderLocalId = orderLocalId,
+                    menuItemId = item.productId, variantId = item.variantId, productName = item.productNameSnapshot, variantName = item.variantNameSnapshot,
+                    quantity = item.quantity, unitPriceCents = item.unitPriceCents, modifiersTotalCents = item.modifiersTotalCents, lineTotalCents = item.lineTotalCents,
+                    status = item.status, notes = item.notes,
+                    modifiersJson = json.encodeToString(item.modifiers.map { m -> PersistedModifier(name = m.optionNameSnapshot ?: "Adicional", quantity = m.quantity, totalCents = m.totalPriceCents) }),
+                    createdAtEpochMs = now,
+                )
+            }
+        }
+        val payments = response.payments.map { p ->
+            TabPaymentEntity(
+                localId = UUID.randomUUID().toString(), serverId = p.id, tabLocalId = localId, method = p.method,
+                amountCents = p.amountCents, receivedCents = p.receivedCents, changeCents = p.changeCents,
+                isCanceled = p.status == "CANCELED", externalReference = p.externalReference, confirmedAt = p.confirmedAt,
+                syncState = SyncState.SYNCED, createdAtEpochMs = now,
             )
         }
-        tabDao.upsertPayments(
-            response.payments.map { p ->
-                TabPaymentEntity(
-                    localId = UUID.randomUUID().toString(), serverId = p.id, tabLocalId = localId, method = p.method,
-                    amountCents = p.amountCents, receivedCents = p.receivedCents, changeCents = p.changeCents,
-                    isCanceled = p.status == "CANCELED", externalReference = p.externalReference, confirmedAt = p.confirmedAt,
-                    syncState = SyncState.SYNCED, createdAtEpochMs = now,
-                )
-            },
+
+        // Grava tudo (tab + pedidos + itens + pagamentos) numa única
+        // transação — ver o comentário em TabDao.writeTabSnapshot para o
+        // motivo de nunca voltar a separar isto em chamadas soltas.
+        tabDao.writeTabSnapshot(
+            tab = response.toEntity().copy(localId = localId, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = now),
+            orders = orders,
+            items = items,
+            payments = payments,
         )
         return tabDao.getTabWithDetails(localId)!!
     }

@@ -21,6 +21,26 @@ interface TabDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTab(tab: TabEntity)
 
+    /**
+     * Grava o snapshot completo de uma comanda vindo do servidor — tab +
+     * pedidos + itens + pagamentos — como UMA ÚNICA transação. Sem isto, cada
+     * chamada (upsertTab, deleteItemsForTab, upsertItems...) commitava
+     * separadamente, e [observeTabWithDetails] (que reage a cada commit)
+     * emitia um estado intermediário com a comanda já atualizada mas os
+     * itens temporariamente vazios (entre o delete e o reinsert) — a UI via
+     * a contagem de itens cair e subir de novo sem nenhum item ter mudado de
+     * verdade, disparando falsos avisos de "item adicionado".
+     */
+    @Transaction
+    suspend fun writeTabSnapshot(tab: TabEntity, orders: List<TabOrderEntity>, items: List<TabItemEntity>, payments: List<TabPaymentEntity>) {
+        upsertTab(tab)
+        deleteItemsForTab(tab.localId)
+        deletePaymentsForTab(tab.localId)
+        orders.forEach { upsertOrder(it) }
+        upsertItems(items)
+        upsertPayments(payments)
+    }
+
     @Update
     suspend fun updateTab(tab: TabEntity)
 
