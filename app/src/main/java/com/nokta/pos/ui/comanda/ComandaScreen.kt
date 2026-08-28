@@ -148,7 +148,7 @@ fun ComandaScreen(
                 onAddProducts = onAddProducts,
                 onCheckout = onCheckout,
                 onCloseTab = viewModel::closeTab,
-                onRequestClose = viewModel::requestClose,
+                onRequestClose = { viewModel.requestClose(onClosed = onCheckout) },
                 onCancelClose = viewModel::cancelClose,
                 onBack = onBack,
             )

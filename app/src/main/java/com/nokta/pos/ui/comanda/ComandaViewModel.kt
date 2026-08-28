@@ -244,16 +244,20 @@ class ComandaViewModel @Inject constructor(
     }
 
     /**
-     * Início do fechamento explícito ("pedir a conta") — opcional, trava o
-     * consumo (novos itens/cancelamento/desconto) antes de cobrar. Cobrar
-     * direto sem passar por aqui continua funcionando (closeTab acima).
+     * Início do fechamento explícito ("pedir a conta") — trava o consumo
+     * (novos itens/cancelamento/desconto) e, em caso de sucesso, chama
+     * [onClosed] para já levar o garçom direto ao pagamento — não faz
+     * sentido travar a conta e deixar o operador numa tela intermediária
+     * tendo que apertar "Pagar" de novo. Cobrar direto sem passar por aqui
+     * continua funcionando (closeTab acima).
      */
-    fun requestClose() {
+    fun requestClose(onClosed: () -> Unit) {
         val organizationId = authRepository.currentOrganizationId() ?: return
         if (_state.value.tab?.isEditable != true) return
 
         viewModelScope.launch {
             runCatching { tabRepository.requestCloseTab(organizationId, tabLocalId) }
+                .onSuccess { onClosed() }
                 .onFailure { e ->
                     _state.value = _state.value.copy(actionMessage = e.message ?: "Não foi possível iniciar o fechamento.")
                 }
