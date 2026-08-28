@@ -143,6 +143,32 @@ class CheckoutViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Botão de voltar do topo (seta ao lado do "NOKTA"). Se a comanda chegou
+     * aqui pelo fluxo "Fechar a conta" (status CLOSING) e nenhum pagamento
+     * já foi registrado, desistir do pagamento não deve deixar a mesa presa
+     * travada — reabre a comanda (CLOSING -> OPEN) antes de voltar, para o
+     * garçom não precisar entrar de novo na comanda só para "Cancelar
+     * fechamento" manualmente. PAYMENT_IN_PROGRESS (já existe pagamento
+     * confirmado) nunca é revertido aqui — só volta a navegação, como antes.
+     */
+    fun onBackPressed(onNavigateBack: () -> Unit) {
+        val organizationId = authRepository.currentOrganizationId()
+        val tab = _state.value.tab
+        if (organizationId == null || tab?.status != com.nokta.pos.comanda.domain.TabStatus.CLOSING) {
+            onNavigateBack()
+            return
+        }
+
+        viewModelScope.launch {
+            // Falha (ex.: sem rede) nunca bloqueia a navegação — o pior caso
+            // é a mesa continuar em CLOSING, exatamente como já seria sem
+            // esta melhoria; o garçom sempre pode cancelar manualmente depois.
+            runCatching { tabRepository.cancelCloseTab(organizationId, tabLocalId) }
+            onNavigateBack()
+        }
+    }
+
     fun selectMethod(method: PaymentUiMethod) {
         _state.value = _state.value.copy(selectedMethod = method, installments = 1, receivedCents = null)
     }

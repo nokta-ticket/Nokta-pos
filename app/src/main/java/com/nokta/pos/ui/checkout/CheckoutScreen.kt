@@ -92,6 +92,11 @@ fun CheckoutScreen(
 
     LaunchedEffect(state.tabClosed) { if (state.tabClosed) onTabClosed() }
 
+    // Mesmo comportamento da seta de voltar do topo (ver onBackPressed) —
+    // gesto/botão físico de voltar do Android não deve deixar a mesa presa
+    // em "Fechando a conta" por um caminho diferente da seta na tela.
+    androidx.activity.compose.BackHandler { viewModel.onBackPressed(onBack) }
+
     Box(Modifier.fillMaxSize().background(NoktaSurface)) {
         when {
             state.isLoading && state.tab == null -> PosLoading(label = "Carregando…")
@@ -105,7 +110,7 @@ fun CheckoutScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            state.tab != null -> CheckoutContent(state = state, viewModel = viewModel, onBack = onBack)
+            state.tab != null -> CheckoutContent(state = state, viewModel = viewModel, onBack = { viewModel.onBackPressed(onBack) })
         }
 
         state.paymentMessage?.let {
