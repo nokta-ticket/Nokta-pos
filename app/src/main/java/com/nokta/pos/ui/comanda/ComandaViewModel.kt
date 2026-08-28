@@ -244,23 +244,23 @@ class ComandaViewModel @Inject constructor(
     }
 
     /**
-     * Início do fechamento explícito ("pedir a conta") — trava o consumo
-     * (novos itens/cancelamento/desconto) e, em caso de sucesso, chama
-     * [onClosed] para já levar o garçom direto ao pagamento — não faz
-     * sentido travar a conta e deixar o operador numa tela intermediária
-     * tendo que apertar "Pagar" de novo. Cobrar direto sem passar por aqui
-     * continua funcionando (closeTab acima).
+     * Início do fechamento explícito ("pedir a conta") — navega para o
+     * pagamento IMEDIATAMENTE (sem esperar a chamada de rede), e só então
+     * dispara `requestCloseTab` em paralelo. A ordem inversa (esperar a
+     * resposta antes de navegar) fazia esta própria tela reagir ao novo
+     * status (OPEN -> CLOSING, já gravado no Room pela resposta) por um
+     * instante antes da navegação acontecer — um flash visível da tela de
+     * comanda "já fechando a conta" entre o clique e a tela de pagamento.
+     * Falha na chamada só aparece como aviso na tela de pagamento (ver
+     * CheckoutViewModel), nunca trazendo o garçom de volta para cá.
      */
     fun requestClose(onClosed: () -> Unit) {
         val organizationId = authRepository.currentOrganizationId() ?: return
         if (_state.value.tab?.isEditable != true) return
 
+        onClosed()
         viewModelScope.launch {
             runCatching { tabRepository.requestCloseTab(organizationId, tabLocalId) }
-                .onSuccess { onClosed() }
-                .onFailure { e ->
-                    _state.value = _state.value.copy(actionMessage = e.message ?: "Não foi possível iniciar o fechamento.")
-                }
         }
     }
 
