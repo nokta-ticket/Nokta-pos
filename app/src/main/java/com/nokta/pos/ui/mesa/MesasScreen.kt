@@ -1,22 +1,29 @@
 package com.nokta.pos.ui.mesa
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
@@ -27,10 +34,10 @@ import com.nokta.pos.ui.theme.MoneyGreen
 
 /**
  * Mesa não é uma venda — é um consumo aberto que pode receber vários
- * lançamentos ao longo do atendimento (ver briefing do módulo). O foco desta
- * tela é achar RÁPIDO a mesa pelo número, não navegar por uma grade de
- * ocupação: isso é gestão de salão (dashboard), o garçom só quer atender a
- * mesa 12.
+ * lançamentos ao longo do atendimento. Central de operação com 2 ações
+ * claras ("Abrir mesa"/"Consultar mesa") e a lista "Mesas em atendimento"
+ * sempre visível — nunca um mapa de salão livre/ocupado (isso é do
+ * dashboard), o garçom só quer atender a mesa 12.
  */
 @Composable
 fun MesasScreen(
@@ -40,52 +47,163 @@ fun MesasScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // Dentro de Abrir/Consultar, o botão físico de voltar retorna à central
+    // (nunca sai da tela de Mesas direto) — mesmo padrão de NovaVendaScreen.
+    BackHandler(enabled = state.mode != MesasMode.CENTRAL) {
+        viewModel.backToCentral()
+    }
+
+    when (state.mode) {
+        MesasMode.CENTRAL -> CentralScreen(state = state, viewModel = viewModel, onOpenTab = onOpenTab, onBack = onBack)
+        MesasMode.ABRIR -> NumeroMesaScreen(
+            title = "Abrir mesa",
+            question = "Qual é o número da mesa?",
+            confirmText = "Continuar",
+            state = state,
+            viewModel = viewModel,
+            onOpenTab = onOpenTab,
+            emptyTabTitle = "Nenhum atendimento aberto.",
+            emptyTabAction = "Iniciar atendimento",
+            occupiedTitle = "Esta mesa já possui um atendimento aberto.",
+            occupiedAction = "Consultar mesa",
+        )
+        MesasMode.CONSULTAR -> NumeroMesaScreen(
+            title = "Consultar mesa",
+            question = "Qual é o número da mesa?",
+            confirmText = "Consultar",
+            state = state,
+            viewModel = viewModel,
+            onOpenTab = onOpenTab,
+            emptyTabTitle = "Nenhum atendimento aberto para esta mesa.",
+            emptyTabAction = "Abrir mesa",
+            occupiedTitle = null,
+            occupiedAction = "Ver consumo",
+        )
+    }
+}
+
+/* ------------------------------ Central ------------------------------ */
+
+@Composable
+private fun CentralScreen(
+    state: MesasUiState,
+    viewModel: MesasViewModel,
+    onOpenTab: (String) -> Unit,
+    onBack: () -> Unit,
+) {
     Scaffold(
         topBar = { PosTopBar(title = "Mesas", onBack = onBack) },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = viewModel::setQuery,
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                placeholder = { Text("Número da mesa") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (state.query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.setQuery("") }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Limpar")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = MaterialTheme.shapes.medium,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
-                textStyle = MaterialTheme.typography.titleMedium,
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+        ) {
+            ActionCard(
+                icon = Icons.Filled.AddCircle,
+                title = "Abrir mesa",
+                description = "Iniciar um novo atendimento para uma mesa",
+                onClick = viewModel::openAbrirMesa,
+            )
+            Spacer(Modifier.height(12.dp))
+            ActionCard(
+                icon = Icons.Filled.Search,
+                title = "Consultar mesa",
+                description = "Ver o consumo de uma mesa em atendimento",
+                onClick = viewModel::openConsultarMesa,
             )
 
-            state.error?.let {
-                PosInlineWarning(it, tone = PosBadgeTone.DANGER, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-            }
+            Spacer(Modifier.height(28.dp))
+            Text("Mesas em atendimento", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
 
+            if (state.isLoading) {
+                PosLoading(label = "Carregando mesas…")
+            } else if (state.openTabs.isEmpty()) {
+                Text(
+                    "Nenhum atendimento aberto.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            } else {
+                Column {
+                    state.openTabs.forEach { tab ->
+                        TabRow(tab = tab, onClick = { onOpenTab(tab.localId) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionCard(icon: ImageVector, title: String, description: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(20.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/* --------------------------- Abrir/Consultar --------------------------- */
+
+/**
+ * Tela de input numérico compartilhada por "Abrir mesa" e "Consultar mesa"
+ * — a lógica de resolução (existe ou não atendimento aberto) é a mesma nos
+ * dois casos (ver [MesasViewModel.openTable]); só o texto/ação de cada
+ * estado muda conforme a intenção do garçom.
+ */
+@Composable
+private fun NumeroMesaScreen(
+    title: String,
+    question: String,
+    confirmText: String,
+    state: MesasUiState,
+    viewModel: MesasViewModel,
+    onOpenTab: (String) -> Unit,
+    emptyTabTitle: String,
+    emptyTabAction: String,
+    occupiedTitle: String?,
+    occupiedAction: String,
+) {
+    Scaffold(
+        topBar = { PosTopBar(title = title, onBack = viewModel::backToCentral) },
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
             when {
-                state.isLoading -> PosLoading(label = "Carregando mesas…")
+                state.query.isBlank() -> NumberEntry(question = question, confirmText = confirmText, viewModel = viewModel)
                 state.tables.none { it.active } -> PosEmptyState(
                     title = "Nenhuma mesa cadastrada",
                     description = "As mesas são cadastradas no dashboard, em Operação › Mesas.",
                     icon = Icons.Filled.TableRestaurant,
-                    actionText = "Atualizar",
-                    onAction = viewModel::load,
                 )
-                // Mesa digitada existe: com consumo mostra o resumo e um
-                // botão para entrar; sem consumo mostra "Nenhum consumo
-                // aberto para esta mesa" + "Iniciar atendimento" (item 5 do
-                // briefing) — nunca abre a comanda direto no toque, nos dois
-                // casos o mesmo composable decide o texto certo.
                 state.matchingTable != null -> {
                     val table = state.matchingTable!!
-                    NoOpenTabOrOccupiedContent(
+                    ResultContent(
                         table = table,
                         openingTableId = state.openingTableId,
+                        emptyTabTitle = emptyTabTitle,
+                        emptyTabAction = emptyTabAction,
+                        occupiedTitle = occupiedTitle,
+                        occupiedAction = occupiedAction,
                         onOpen = { viewModel.openTable(table, onOpenTab) },
                     )
                 }
@@ -94,19 +212,57 @@ fun MesasScreen(
                     description = "Nenhuma mesa corresponde a \"${state.query}\".",
                     icon = Icons.Filled.Search,
                 )
-                else -> EmAtendimentoList(tabs = state.openTabs, onOpenTab = onOpenTab)
+            }
+            state.error?.let {
+                PosInlineWarning(it, tone = PosBadgeTone.DANGER, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
         }
     }
 }
 
+@Composable
+private fun NumberEntry(question: String, confirmText: String, viewModel: MesasViewModel) {
+    var localValue by remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(question, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(
+            value = localValue,
+            onValueChange = { localValue = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Número da mesa") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+            textStyle = MaterialTheme.typography.headlineSmall.copy(textAlign = TextAlign.Center),
+        )
+        Spacer(Modifier.height(20.dp))
+        PosPrimaryButton(
+            text = confirmText,
+            enabled = localValue.isNotBlank(),
+            onClick = { viewModel.setQuery(localValue) },
+        )
+    }
+}
+
 /**
- * Conteúdo mostrado ao digitar/selecionar uma mesa específica — cobre os
- * dois casos do briefing (seções 5 e 6) com o mesmo composable: sem consumo
- * mostra "Iniciar atendimento"; com consumo mostra o resumo e entra direto.
+ * Resultado após informar o número — cobre os 2 estados pedidos (sem
+ * consumo / já ocupada), com texto e ação dependendo se veio de "Abrir
+ * mesa" ou "Consultar mesa".
  */
 @Composable
-private fun NoOpenTabOrOccupiedContent(table: VenueTable, openingTableId: Long?, onOpen: () -> Unit) {
+private fun ResultContent(
+    table: VenueTable,
+    openingTableId: Long?,
+    emptyTabTitle: String,
+    emptyTabAction: String,
+    occupiedTitle: String?,
+    occupiedAction: String,
+    onOpen: () -> Unit,
+) {
     val isOpening = openingTableId == table.id
     Column(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -129,16 +285,20 @@ private fun NoOpenTabOrOccupiedContent(table: VenueTable, openingTableId: Long?,
                 Spacer(Modifier.height(4.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            occupiedTitle?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(Modifier.height(20.dp))
-            PosPrimaryButton(text = "Ver consumo", onClick = onOpen, loading = isOpening)
+            PosPrimaryButton(text = occupiedAction, onClick = onOpen, loading = isOpening)
         } else {
             Text(
-                "Nenhum consumo aberto para esta mesa.",
+                emptyTabTitle,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
-            PosPrimaryButton(text = "Iniciar atendimento", onClick = onOpen, loading = isOpening)
+            PosPrimaryButton(text = emptyTabAction, onClick = onOpen, loading = isOpening)
         }
     }
 }
@@ -152,32 +312,7 @@ private fun StatusBadgeRow(status: TabStatus) {
     }
 }
 
-/**
- * Lista de mesas com consumo aberto — só aparece sem nenhum número digitado.
- * Vem de [Tab] (searchOpenTabs, tipo TABLE), não de [VenueTable]: traz
- * contagem de itens, que a mesa sozinha não tem.
- */
-@Composable
-private fun EmAtendimentoList(tabs: List<Tab>, onOpenTab: (String) -> Unit) {
-    if (tabs.isEmpty()) {
-        PosEmptyState(
-            title = "Nenhuma mesa em atendimento",
-            description = "Digite o número de uma mesa acima para começar.",
-            icon = Icons.Filled.TableRestaurant,
-        )
-        return
-    }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text("Em atendimento", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-    }
-    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-        items(tabs, key = { it.localId }) { tab ->
-            TabRow(tab = tab, onClick = { onOpenTab(tab.localId) })
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-        }
-    }
-}
+/* --------------------------- Linha da lista --------------------------- */
 
 @Composable
 private fun TabRow(tab: Tab, onClick: () -> Unit) {
@@ -186,7 +321,7 @@ private fun TabRow(tab: Tab, onClick: () -> Unit) {
             .fillMaxWidth()
             .heightIn(min = 76.dp)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
