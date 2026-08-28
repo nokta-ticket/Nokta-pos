@@ -164,6 +164,8 @@ data class VenueTableEntity(
     val active: Boolean,
     val openTabServerId: Long?,
     val openTabCode: String?,
+    /** OPEN, CLOSING ou PAYMENT_IN_PROGRESS — nunca CLOSED/CANCELED (não apareceria como openTab). Null só para linhas gravadas antes deste campo existir. */
+    val openTabStatus: String?,
     val openTabTotalCents: Long?,
     val openTabRemainingCents: Long?,
     val openTabCustomerName: String?,

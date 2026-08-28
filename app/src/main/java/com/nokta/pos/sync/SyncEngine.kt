@@ -8,9 +8,12 @@ import com.nokta.pos.data.local.entity.OutboxOperationType
 import com.nokta.pos.data.local.entity.OutboxStatus
 import com.nokta.pos.data.local.entity.SyncState
 import com.nokta.pos.network.NoktaApi
+import com.nokta.pos.network.dto.CancelItemOutboxPayload
+import com.nokta.pos.network.dto.CancelOrderItemRequest
 import com.nokta.pos.network.dto.CreateOrderRequest
 import com.nokta.pos.network.dto.CreatePaymentRequest
 import com.nokta.pos.network.dto.CreateTabRequest
+import com.nokta.pos.network.ITEM_ALREADY_CANCELED_MESSAGE
 import com.nokta.pos.network.ORDER_ALREADY_SENT_MESSAGE
 import com.nokta.pos.network.humanizedApiMessage
 import kotlinx.coroutines.flow.Flow
@@ -188,11 +191,41 @@ class SyncEngine @Inject constructor(
                     TabServerIdLookup.Orphaned -> StepOutcome.Rejected("Comanda nunca foi criada no servidor")
                 }
             }
-            OutboxOperationType.CANCEL_ITEM, OutboxOperationType.CLOSE_TAB, OutboxOperationType.ADD_ITEM -> {
-                // Reservado para extensão futura — hoje estas operações são
-                // sempre síncronas (ver TabRepository.cancelItem/closeTab),
-                // nunca enfileiradas. Se aparecerem aqui, é um bug de quem
-                // enfileirou: melhor rejeitar e expor do que travar a fila.
+            OutboxOperationType.CANCEL_ITEM -> {
+                val payload = json.decodeFromString<CancelItemOutboxPayload>(operation.payloadJson)
+                try {
+                    api.cancelOrderItem(operation.organizationId, payload.itemServerId, CancelOrderItemRequest(payload.reason))
+                } catch (e: HttpException) {
+                    // Mesmo princípio de SEND_ORDER acima: um retry cuja 1ª
+                    // tentativa já teve sucesso no servidor (resposta perdida
+                    // por timeout/queda) recebe "já está cancelado" — trata
+                    // como sucesso, nunca como falha visível ao operador.
+                    if (e.code() !in 400..499 || e.humanizedApiMessage() != ITEM_ALREADY_CANCELED_MESSAGE) throw e
+                }
+                tabDao.getItemByServerId(payload.itemServerId)?.let { local ->
+                    tabDao.updateItem(local.copy(status = "CANCELED"))
+                }
+                tabDao.getTabByLocalId(operation.tabLocalId)?.serverId?.let { serverId ->
+                    refreshTabSnapshot(operation.organizationId, operation.tabLocalId, serverId)
+                }
+                StepOutcome.Success
+            }
+            // CLOSE_TAB permanece deliberadamente SÍNCRONO, para sempre — não é
+            // "reservado para o futuro". Fechar uma comanda depende do estado
+            // financeiro ATUAL no servidor (outro terminal pode ter lançado
+            // item ou registrado pagamento nesse meio tempo); enfileirar "feche
+            // isso" para rodar quando a rede voltar arriscaria fechar com um
+            // total que já não é mais real. Diferente de SEND_ORDER/
+            // CANCEL_ITEM/REGISTER_PAYMENT (fatos já consumados, imutáveis),
+            // fechar é uma decisão que precisa ler o servidor antes de agir —
+            // por isso TabRepository.closeTab sempre exige rede.
+            OutboxOperationType.CLOSE_TAB -> {
+                StepOutcome.Rejected("Fechamento de comanda nunca é enfileirado — exige rede no momento da ação.")
+            }
+            OutboxOperationType.ADD_ITEM -> {
+                // Valor morto do enum: o fluxo real de "adicionar item" usa
+                // SEND_ORDER (criar pedido + enviar), nunca ADD_ITEM. Rejeita
+                // se aparecer — sinal de bug em quem enfileirou.
                 StepOutcome.Rejected("Tipo de operação não processado pelo SyncEngine: ${operation.type}")
             }
         }

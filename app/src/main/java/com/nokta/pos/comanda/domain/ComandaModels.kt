@@ -19,7 +19,22 @@ fun negativeIdFromLocalId(localId: String): Long {
 }
 
 enum class TabType { TABLE, INDIVIDUAL, COUNTER }
-enum class TabStatus { OPEN, CLOSED, CANCELED }
+
+/**
+ * OPEN -> CLOSING -> PAYMENT_IN_PROGRESS -> CLOSED é o caminho de "fechar a
+ * conta antes de cobrar" (opcional — pagar direto de OPEN sem passar por
+ * CLOSING continua funcionando e fecha sozinho quando o saldo zera, fluxo
+ * rápido de balcão/bar inalterado). CLOSING/PAYMENT_IN_PROGRESS bloqueiam
+ * edição de consumo no backend (ver Tab.isEditable) mas a mesa continua
+ * fisicamente ocupada nesses estados (ver Tab.isOccupying).
+ */
+enum class TabStatus { OPEN, CLOSING, PAYMENT_IN_PROGRESS, CLOSED, CANCELED;
+
+    companion object {
+        /** Fallback para OPEN quando o backend devolve um status que este app ainda não conhece — nunca derruba a tela por um enum desconhecido. */
+        fun parse(raw: String): TabStatus = entries.firstOrNull { it.name == raw } ?: OPEN
+    }
+}
 enum class OrderStatus { DRAFT, SENT, IN_PREPARATION, READY, DELIVERED, CANCELED }
 
 /**
@@ -193,6 +208,13 @@ data class Tab(
     val id: Long get() = serverId ?: negativeLocalId
 
     val isOpen get() = status == TabStatus.OPEN
+
+    /** Pode lançar/editar/cancelar item, aplicar desconto/taxa — só em OPEN (CLOSING/PAYMENT_IN_PROGRESS já congelaram o consumo para cobrança). */
+    val isEditable get() = status == TabStatus.OPEN
+
+    /** A mesa ainda está fisicamente ocupada (cliente não foi embora) — usar para decidir o que aparece como "em atendimento", nunca [isOpen] sozinho (que exclui CLOSING/PAYMENT_IN_PROGRESS). */
+    val isOccupying get() = status == TabStatus.OPEN || status == TabStatus.CLOSING || status == TabStatus.PAYMENT_IN_PROGRESS
+
     val isFullyPaid get() = remaining.isZeroOrNegative()
     val hasPartialPayment get() = paid.isPositive() && !isFullyPaid
 
@@ -233,6 +255,8 @@ data class VenueTable(
     val active: Boolean,
     val openTabId: Long?,
     val openTabCode: String?,
+    /** OPEN, CLOSING ou PAYMENT_IN_PROGRESS — nunca null quando openTabId != null (backend só inclui openTab nesses status). */
+    val openTabStatus: TabStatus?,
     val openTabTotal: Money?,
     val openTabRemaining: Money?,
     val openTabCustomerName: String?,

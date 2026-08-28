@@ -1,12 +1,10 @@
 package com.nokta.pos.ui.mesa
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -17,18 +15,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.nokta.pos.comanda.domain.Tab
+import com.nokta.pos.comanda.domain.TabStatus
 import com.nokta.pos.comanda.domain.VenueTable
 import com.nokta.pos.ui.components.*
 import com.nokta.pos.ui.theme.MoneyGreen
 
 /**
- * Mesas em grade. Verde = livre, roxo = ocupada com o valor consumido à
- * vista: o garçom vê o salão inteiro numa olhada e toca direto na mesa que
- * precisa atender.
+ * Mesa não é uma venda — é um consumo aberto que pode receber vários
+ * lançamentos ao longo do atendimento (ver briefing do módulo). O foco desta
+ * tela é achar RÁPIDO a mesa pelo número, não navegar por uma grade de
+ * ocupação: isso é gestão de salão (dashboard), o garçom só quer atender a
+ * mesa 12.
  */
 @Composable
 fun MesasScreen(
@@ -39,38 +41,30 @@ fun MesasScreen(
     val state by viewModel.state.collectAsState()
 
     Scaffold(
-        topBar = {
-            PosTopBar(
-                title = "Mesas",
-                subtitle = if (state.tables.isNotEmpty()) {
-                    "${state.occupiedCount} de ${state.tables.count { it.active }} ocupadas"
-                } else null,
-                onBack = onBack,
-            )
-        },
+        topBar = { PosTopBar(title = "Mesas", onBack = onBack) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            if (state.tables.size > 8) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = viewModel::setQuery,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Buscar mesa ou cliente") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (state.query.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.setQuery("") }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Limpar")
-                            }
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = viewModel::setQuery,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                placeholder = { Text("Número da mesa") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setQuery("") }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Limpar")
                         }
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
-                )
-            }
+                    }
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
+                textStyle = MaterialTheme.typography.titleMedium,
+            )
 
             state.error?.let {
-                PosInlineWarning(it, tone = PosBadgeTone.DANGER, modifier = Modifier.padding(16.dp))
+                PosInlineWarning(it, tone = PosBadgeTone.DANGER, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             }
 
             when {
@@ -82,86 +76,141 @@ fun MesasScreen(
                     actionText = "Atualizar",
                     onAction = viewModel::load,
                 )
-                state.visibleTables.isEmpty() -> PosEmptyState(
-                    title = "Nada encontrado",
+                // Mesa digitada existe: com consumo mostra o resumo e um
+                // botão para entrar; sem consumo mostra "Nenhum consumo
+                // aberto para esta mesa" + "Iniciar atendimento" (item 5 do
+                // briefing) — nunca abre a comanda direto no toque, nos dois
+                // casos o mesmo composable decide o texto certo.
+                state.matchingTable != null -> {
+                    val table = state.matchingTable!!
+                    NoOpenTabOrOccupiedContent(
+                        table = table,
+                        openingTableId = state.openingTableId,
+                        onOpen = { viewModel.openTable(table, onOpenTab) },
+                    )
+                }
+                state.queryMatchesNoTable -> PosEmptyState(
+                    title = "Mesa não encontrada",
                     description = "Nenhuma mesa corresponde a \"${state.query}\".",
                     icon = Icons.Filled.Search,
                 )
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(state.visibleTables, key = { it.id }) { table ->
-                        TableCard(
-                            table = table,
-                            isOpening = state.openingTableId == table.id,
-                            onClick = { viewModel.openTable(table, onOpenTab) },
-                        )
-                    }
-                }
+                else -> EmAtendimentoList(tabs = state.openTabs, onOpenTab = onOpenTab)
             }
         }
     }
 }
 
+/**
+ * Conteúdo mostrado ao digitar/selecionar uma mesa específica — cobre os
+ * dois casos do briefing (seções 5 e 6) com o mesmo composable: sem consumo
+ * mostra "Iniciar atendimento"; com consumo mostra o resumo e entra direto.
+ */
 @Composable
-private fun TableCard(table: VenueTable, isOpening: Boolean, onClick: () -> Unit) {
-    val occupied = table.isOccupied
-    val container = if (occupied) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-    val border = if (occupied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-
+private fun NoOpenTabOrOccupiedContent(table: VenueTable, openingTableId: Long?, onOpen: () -> Unit) {
+    val isOpening = openingTableId == table.id
     Column(
-        modifier = Modifier
-            .heightIn(min = 116.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .background(container)
-            .border(if (occupied) 2.dp else 1.5.dp, border, MaterialTheme.shapes.medium)
-            .clickable(enabled = !isOpening, onClick = onClick)
-            .padding(14.dp),
+        modifier = Modifier.fillMaxWidth().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(table.name, style = MaterialTheme.typography.titleLarge)
-            if (isOpening) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            } else {
-                PosBadge(
-                    if (occupied) "Ocupada" else "Livre",
-                    if (occupied) PosBadgeTone.NEUTRAL else PosBadgeTone.SUCCESS,
-                )
-            }
-        }
+        Text("Mesa ${table.name}", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.weight(1f))
-
-        if (occupied) {
-            table.openTabCustomerName?.let {
+        if (table.isOccupied) {
+            table.openTabStatus?.let { StatusBadgeRow(it) }
+            Spacer(Modifier.height(8.dp))
+            table.openTabRemaining?.let {
                 Text(
-                    it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    it.formatBRL(),
+                    style = MaterialTheme.typography.displaySmall,
+                    color = if (it.isZeroOrNegative()) MoneyGreen else MaterialTheme.colorScheme.onSurface,
                 )
             }
-            table.openTabRemaining?.let { remaining ->
-                Text(
-                    remaining.formatBRL(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (remaining.isZeroOrNegative()) MoneyGreen else MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    if (remaining.isZeroOrNegative()) "Pago" else "em aberto",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            table.openTabCustomerName?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Spacer(Modifier.height(20.dp))
+            PosPrimaryButton(text = "Ver consumo", onClick = onOpen, loading = isOpening)
         } else {
             Text(
-                table.capacity?.let { "$it lugares" } ?: "Tocar para abrir",
+                "Nenhum consumo aberto para esta mesa.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(20.dp))
+            PosPrimaryButton(text = "Iniciar atendimento", onClick = onOpen, loading = isOpening)
+        }
+    }
+}
+
+@Composable
+private fun StatusBadgeRow(status: TabStatus) {
+    when (status) {
+        TabStatus.CLOSING -> PosBadge("Fechando a conta", PosBadgeTone.WARNING)
+        TabStatus.PAYMENT_IN_PROGRESS -> PosBadge("Recebendo pagamento", PosBadgeTone.WARNING)
+        else -> PosBadge("Em atendimento", PosBadgeTone.NEUTRAL)
+    }
+}
+
+/**
+ * Lista de mesas com consumo aberto — só aparece sem nenhum número digitado.
+ * Vem de [Tab] (searchOpenTabs, tipo TABLE), não de [VenueTable]: traz
+ * contagem de itens, que a mesa sozinha não tem.
+ */
+@Composable
+private fun EmAtendimentoList(tabs: List<Tab>, onOpenTab: (String) -> Unit) {
+    if (tabs.isEmpty()) {
+        PosEmptyState(
+            title = "Nenhuma mesa em atendimento",
+            description = "Digite o número de uma mesa acima para começar.",
+            icon = Icons.Filled.TableRestaurant,
+        )
+        return
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text("Em atendimento", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+    }
+    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+        items(tabs, key = { it.localId }) { tab ->
+            TabRow(tab = tab, onClick = { onOpenTab(tab.localId) })
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+        }
+    }
+}
+
+@Composable
+private fun TabRow(tab: Tab, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 76.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(tab.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(
+                "${tab.activeItems.size} ${if (tab.activeItems.size == 1) "item" else "itens"}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                tab.remaining.formatBRL(),
+                style = MaterialTheme.typography.titleMedium,
+                color = if (tab.isFullyPaid) MoneyGreen else MaterialTheme.colorScheme.onSurface,
+            )
+            when (tab.status) {
+                TabStatus.CLOSING, TabStatus.PAYMENT_IN_PROGRESS -> PosBadge("Fechando", PosBadgeTone.WARNING)
+                else -> if (tab.hasPartialPayment) {
+                    PosBadge("Parcial", PosBadgeTone.WARNING)
+                } else if (tab.isFullyPaid) {
+                    PosBadge("Pago", PosBadgeTone.SUCCESS)
+                }
+            }
         }
     }
 }

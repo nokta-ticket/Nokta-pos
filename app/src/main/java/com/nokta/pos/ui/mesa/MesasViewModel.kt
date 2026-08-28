@@ -4,9 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nokta.pos.auth.AuthRepository
 import com.nokta.pos.comanda.data.TabRepository
+import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabType
 import com.nokta.pos.comanda.domain.VenueTable
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -15,23 +18,24 @@ import javax.inject.Inject
 
 data class MesasUiState(
     val tables: List<VenueTable> = emptyList(),
+    /** Mesas com comanda aberta (OPEN/CLOSING/PAYMENT_IN_PROGRESS) — fonte real da lista "Em atendimento" (traz contagem de itens, que VenueTable não tem). */
+    val openTabs: List<Tab> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
     val query: String = "",
     val openingTableId: Long? = null,
 ) {
-    val visibleTables: List<VenueTable>
+    /** Mesa correspondente ao número digitado — busca "contains" (não paridade exata), mesas podem ter nome livre ("Varanda 3"). */
+    val matchingTable: VenueTable?
         get() {
-            val q = query.trim().lowercase()
-            val active = tables.filter { it.active }
-            return if (q.isBlank()) active
-            else active.filter { table ->
-                table.name.lowercase().contains(q) ||
-                    table.openTabCustomerName?.normalize()?.contains(q.normalize()) == true
-            }
+            val q = query.trim()
+            if (q.isBlank()) return null
+            return tables.filter { it.active }.firstOrNull { it.name.trim().equals(q, ignoreCase = true) }
+                ?: tables.filter { it.active }.firstOrNull { it.name.normalize().contains(q.normalize()) }
         }
 
-    val occupiedCount get() = tables.count { it.isOccupied }
+    /** Nenhuma mesa cadastrada bate com o número digitado — mostra "iniciar atendimento" só quando isto for claramente uma mesa real. */
+    val queryMatchesNoTable: Boolean get() = query.isNotBlank() && matchingTable == null && tables.any { it.active }
 }
 
 private fun String.normalize(): String =
@@ -40,12 +44,11 @@ private fun String.normalize(): String =
         .lowercase()
 
 /**
- * Lista de mesas para operar — não é mapa de salão nem gestão de layout
- * (item 8: isso é do dashboard). O garçom quer: ver quais estão ocupadas,
- * quanto cada uma consumiu, e entrar numa delas para lançar ou cobrar.
- *
- * `GET tables` já devolve a comanda aberta de cada mesa, então a tela inteira
- * sai de uma chamada só — sem N+1 nem endpoint novo.
+ * Localizar a mesa pelo número é o caminho principal (não é grade de
+ * ocupação livre/ocupada — isso é gestão de salão, que é do dashboard).
+ * "Em atendimento" mostra as mesas com consumo aberto, com itens e valor —
+ * dados de [Tab] (via searchOpenTabs, tipo TABLE), não de [VenueTable]
+ * (que só tem o total, sem contagem de itens).
  */
 @HiltViewModel
 class MesasViewModel @Inject constructor(
@@ -56,9 +59,12 @@ class MesasViewModel @Inject constructor(
     private val _state = MutableStateFlow(MesasUiState())
     val state: StateFlow<MesasUiState> = _state
 
+    private var searchJob: Job? = null
+
     init {
         observeTables()
         load()
+        searchOpenTabs()
     }
 
     /** A tela observa o Room continuamente — mostra o último dado conhecido com aviso de idade se offline. */
@@ -81,7 +87,23 @@ class MesasViewModel @Inject constructor(
         }
     }
 
-    fun setQuery(query: String) { _state.value = _state.value.copy(query = query) }
+    fun setQuery(query: String) {
+        _state.value = _state.value.copy(query = query)
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(250)
+            searchOpenTabs(query)
+        }
+    }
+
+    private fun searchOpenTabs(query: String? = null) {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val locationId = authRepository.currentLocationId() ?: return
+        viewModelScope.launch {
+            runCatching { tabRepository.searchOpenTabs(organizationId, locationId, search = query, type = TabType.TABLE) }
+                .onSuccess { tabs -> _state.value = _state.value.copy(openTabs = tabs) }
+        }
+    }
 
     /**
      * Entra numa mesa. Se já houver comanda aberta, abre ela; se não, abre uma

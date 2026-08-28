@@ -300,6 +300,72 @@ class SyncEngineTest {
         assertEquals(2, db.outboxDao().getPending().size)
     }
 
+    @Test
+    fun `CANCEL_ITEM com item ja cancelado pelo servidor e tratado como sucesso, nunca rejeitado`() = runTest {
+        // Mesmo mecanismo do SEND_ORDER: a 1a tentativa de CANCEL_ITEM
+        // cancelou com sucesso no servidor, mas a resposta se perdeu antes
+        // de voltar — o app reenfileira a MESMA operacao, o retry recebe
+        // 400 "Este item já está cancelado." e isso deve virar sucesso.
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "cancel-1", type = OutboxOperationType.CANCEL_ITEM, organizationId = 1,
+                tabLocalId = "tab-1",
+                payloadJson = json.encodeToString(com.nokta.pos.network.dto.CancelItemOutboxPayload(itemServerId = 777, reason = "teste")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.cancelOrderItemThrows = { HttpException(Response.error<Any>(400, okhttp3.ResponseBody.create(null, """{"message":"Este item já está cancelado."}"""))) }
+        api.getTabResponse = { tabResponse(id = it) }
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertFalse(result.stoppedByNetwork)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
+    @Test
+    fun `CANCEL_ITEM com outro erro 4xx continua sendo rejeitado normalmente`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "cancel-1", type = OutboxOperationType.CANCEL_ITEM, organizationId = 1,
+                tabLocalId = "tab-1",
+                payloadJson = json.encodeToString(com.nokta.pos.network.dto.CancelItemOutboxPayload(itemServerId = 777, reason = "teste")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.cancelOrderItemThrows = { HttpException(Response.error<Any>(400, okhttp3.ResponseBody.create(null, """{"message":"Comanda não está aberta."}"""))) }
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
+    @Test
+    fun `CLOSE_TAB no Outbox e sempre rejeitado — nunca enfileirado de verdade, decisao permanente`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "close-1", type = OutboxOperationType.CLOSE_TAB, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = "{}",
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+    }
+
     private fun tabResponse(id: Long) = TabResponse(
         id = id, organizationId = 1, locationId = 1, tableId = null, table = null,
         publicCode = "%04d".format(id), type = "COUNTER", status = "OPEN",
@@ -329,11 +395,13 @@ private class FakeNoktaApi : NoktaApi {
     var createOrderCallCount = 0
     var sendOrderCallCount = 0
     var createPaymentCallCount = 0
+    var cancelOrderItemCallCount = 0
 
     var createTabResponse: ((CreateTabRequest) -> Any)? = null
     var createTabThrows: (() -> Throwable)? = null
     var createOrderThrows: (() -> Throwable)? = null
     var sendOrderThrows: (() -> Throwable)? = null
+    var cancelOrderItemThrows: (() -> Throwable)? = null
     var createPaymentResponse: ((Long) -> PaymentResponse)? = null
     var getTabResponse: ((Long) -> TabResponse)? = null
 
@@ -357,6 +425,8 @@ private class FakeNoktaApi : NoktaApi {
 
     override suspend fun getTabByPublicCode(organizationId: Long, locationId: Long, publicCode: String): TabResponse = error("not used")
     override suspend fun closeTab(organizationId: Long, tabId: Long): TabResponse = error("not used")
+    override suspend fun requestCloseTab(organizationId: Long, tabId: Long): TabResponse = error("not used")
+    override suspend fun cancelCloseTab(organizationId: Long, tabId: Long): TabResponse = error("not used")
     override suspend fun listTabs(organizationId: Long, locationId: Long, status: String?, type: String?, search: String?): List<TabResponse> = emptyList()
     override suspend fun listTables(organizationId: Long, locationId: Long): List<TableResponse> = emptyList()
 
@@ -372,7 +442,16 @@ private class FakeNoktaApi : NoktaApi {
         return OrderResponse(id = orderId, tabId = 1, publicCode = "0001", status = "SENT", createdAt = null, items = emptyList())
     }
 
-    override suspend fun cancelOrderItem(organizationId: Long, itemId: Long, body: com.nokta.pos.network.dto.CancelOrderItemRequest) = error("not used")
+    override suspend fun cancelOrderItem(organizationId: Long, itemId: Long, body: com.nokta.pos.network.dto.CancelOrderItemRequest): com.nokta.pos.network.dto.OrderItemResponse {
+        cancelOrderItemCallCount++
+        cancelOrderItemThrows?.invoke()?.let { throw it }
+        return com.nokta.pos.network.dto.OrderItemResponse(
+            id = itemId, productId = 1, variantId = 1, quantity = 1,
+            productNameSnapshot = "Item", variantNameSnapshot = "Único",
+            unitPriceCents = 0, modifiersTotalCents = 0, lineTotalCents = 0,
+            status = "CANCELED",
+        )
+    }
 
     override suspend fun createPayment(organizationId: Long, tabId: Long, body: CreatePaymentRequest): PaymentResponse {
         createPaymentCallCount++

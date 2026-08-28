@@ -27,6 +27,16 @@ private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
 const val ORDER_ALREADY_SENT_MESSAGE = "Este pedido já foi enviado."
 
 /**
+ * Mensagem exata devolvida por `POST venue-order-items/:id/cancel` (backend,
+ * `VenueOrdersService.cancelItem`) quando o item já está CANCELED. Mesmo
+ * princípio de [ORDER_ALREADY_SENT_MESSAGE]: um retry offline (Outbox
+ * CANCEL_ITEM) que já teve sucesso antes, mas cuja confirmação se perdeu,
+ * precisa tratar esse 400 como sucesso — o item já está cancelado de
+ * verdade, nunca é falha visível ao operador.
+ */
+const val ITEM_ALREADY_CANCELED_MESSAGE = "Este item já está cancelado."
+
+/**
  * `HttpException.message()` do Retrofit é só "HTTP 400"/"Bad Request" — nunca
  * o motivo real. O backend (NestJS) sempre devolve o motivo de verdade no
  * corpo (`{"message": "..."}`, às vezes uma lista de erros de validação em

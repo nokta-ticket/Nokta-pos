@@ -72,6 +72,20 @@ interface NoktaApi {
         @Path("tabId") tabId: Long,
     ): TabResponse
 
+    /** Início do fechamento explícito ("pedir a conta") — OPEN -> CLOSING. Opcional: closeTab direto de OPEN continua funcionando. */
+    @POST("organizations/{orgId}/venue/operation/tabs/{tabId}/request-close")
+    suspend fun requestCloseTab(
+        @Path("orgId") organizationId: Long,
+        @Path("tabId") tabId: Long,
+    ): TabResponse
+
+    /** Desfaz requestCloseTab() — CLOSING -> OPEN. Só antes de qualquer pagamento confirmado. */
+    @POST("organizations/{orgId}/venue/operation/tabs/{tabId}/cancel-close")
+    suspend fun cancelCloseTab(
+        @Path("orgId") organizationId: Long,
+        @Path("tabId") tabId: Long,
+    ): TabResponse
+
     /**
      * Busca comandas da unidade. `search` casa `publicCode` OU `customerName`
      * no backend (`venue-tabs.service.ts`), então o mesmo campo serve para

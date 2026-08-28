@@ -110,6 +110,10 @@ interface TabDao {
     @Query("SELECT * FROM tab_item WHERE localId = :localId")
     suspend fun getItemByLocalId(localId: String): TabItemEntity?
 
+    /** Usado pelo SyncEngine para localizar o registro local a partir do serverId gravado no payload do Outbox (CANCEL_ITEM). */
+    @Query("SELECT * FROM tab_item WHERE serverId = :serverId")
+    suspend fun getItemByServerId(serverId: Long): TabItemEntity?
+
     @Query("DELETE FROM tab_item WHERE tabLocalId = :tabLocalId")
     suspend fun deleteItemsForTab(tabLocalId: String)
 

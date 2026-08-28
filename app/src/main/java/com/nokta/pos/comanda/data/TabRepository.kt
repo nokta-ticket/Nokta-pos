@@ -73,6 +73,11 @@ class TabRepository @Inject constructor(
     // Leitura — sempre do Room, nunca bloqueada por rede.
     // ---------------------------------------------------------------------
 
+    companion object {
+        /** Mesma lista de OCCUPYING_TAB_STATUSES no backend — mesa/comanda ainda em atendimento, mesmo já em processo de fechamento. */
+        private const val OCCUPYING_STATUSES_QUERY = "OPEN,CLOSING,PAYMENT_IN_PROGRESS"
+    }
+
     /** A tela de comanda observa isto continuamente. */
     fun observeTab(localId: String): Flow<Tab?> =
         tabDao.observeTabWithDetails(localId).map { it?.toDomain() }
@@ -139,7 +144,10 @@ class TabRepository @Inject constructor(
      */
     suspend fun searchOpenTabs(organizationId: Long, locationId: Long, search: String? = null, type: TabType? = null): List<Tab> {
         try {
-            val response = api.listTabs(organizationId, locationId, status = TabStatus.OPEN.name, type = type?.name, search = search?.trim()?.takeIf { it.isNotEmpty() })
+            // OCCUPYING_STATUSES (não só OPEN): comandas em CLOSING/
+            // PAYMENT_IN_PROGRESS ainda estão sendo atendidas — nunca devem
+            // desaparecer da busca só porque o garçom já tocou "fechar a conta".
+            val response = api.listTabs(organizationId, locationId, status = OCCUPYING_STATUSES_QUERY, type = type?.name, search = search?.trim()?.takeIf { it.isNotEmpty() })
             // toEntity() devolve localId="" de propósito — aqui é o "caller"
             // que o comentário da função promete: reaproveita o localId já
             // conhecido desta comanda (por serverId) para não perder o
@@ -416,8 +424,29 @@ class TabRepository @Inject constructor(
             tabDao.updateItem(item.copy(status = "CANCELED"))
             CancelItemOutcome.Success
         } catch (e: IOException) {
-            CancelItemOutcome.OfflineNotSupported
+            // Cancelar é um FATO já decidido pelo operador (diferente de
+            // fechar comanda, que depende de ler o estado atual do servidor)
+            // — grava otimista local e enfileira, mesmo padrão de submitOrder.
+            tabDao.updateItem(item.copy(status = "CANCELED"))
+            enqueueCancelItem(organizationId, item.tabLocalId, serverId, reason)
+            CancelItemOutcome.QueuedOffline
         }
+    }
+
+    private suspend fun enqueueCancelItem(organizationId: Long, tabLocalId: String, itemServerId: Long, reason: String) {
+        outboxDao.enqueue(
+            OutboxEntity(
+                operationId = UUID.randomUUID().toString(),
+                type = OutboxOperationType.CANCEL_ITEM,
+                organizationId = organizationId,
+                tabLocalId = tabLocalId,
+                payloadJson = json.encodeToString(com.nokta.pos.network.dto.CancelItemOutboxPayload(itemServerId, reason)),
+                status = OutboxStatus.PENDING,
+                retryCount = 0, lastError = null,
+                createdAtEpochMs = System.currentTimeMillis(), lastAttemptAtEpochMs = null,
+            ),
+        )
+        syncEngine.requestSync()
     }
 
     /**
@@ -446,8 +475,12 @@ class TabRepository @Inject constructor(
     suspend fun decreaseItemQuantity(organizationId: Long, item: com.nokta.pos.comanda.domain.TabItem): CancelItemOutcome {
         val entity = tabDao.getItemByLocalId(item.localId) ?: return CancelItemOutcome.NotFound
         val outcome = cancelItem(organizationId, item.localId, reason = "Ajuste de quantidade pelo operador")
-        if (outcome != CancelItemOutcome.Success && outcome != CancelItemOutcome.RemovedLocalDraft) return outcome
+        if (outcome == CancelItemOutcome.NotFound) return outcome
 
+        // Success, RemovedLocalDraft e QueuedOffline liberam o relançamento —
+        // mesmo enfileirado (offline), o CANCEL_ITEM sempre sincroniza antes
+        // do SEND_ORDER abaixo (fila FIFO por sequence), nunca invertendo a
+        // ordem no servidor.
         val remaining = item.quantity - 1
         if (remaining > 0) {
             submitOrder(
@@ -459,10 +492,31 @@ class TabRepository @Inject constructor(
         return outcome
     }
 
+    /**
+     * Fechamento DEFINITIVO — sempre síncrono, exige rede. Nunca enfileirado
+     * (ver SyncEngine.CLOSE_TAB): depende do total OFICIAL no servidor no
+     * instante da chamada, que pode ter mudado por outro terminal.
+     */
     suspend fun closeTab(organizationId: Long, tabLocalId: String): Tab {
         val serverId = tabDao.getTabByLocalId(tabLocalId)?.serverId
             ?: throw IllegalStateException("Comanda ainda não sincronizada — aguarde a conexão para fechar.")
         val response = api.closeTab(organizationId, serverId)
+        return writeTabFromServer(response, localOverride = tabLocalId).toDomain()
+    }
+
+    /** Início do fechamento explícito ("pedir a conta") — OPEN -> CLOSING. Mesma exigência de rede síncrona de closeTab. */
+    suspend fun requestCloseTab(organizationId: Long, tabLocalId: String): Tab {
+        val serverId = tabDao.getTabByLocalId(tabLocalId)?.serverId
+            ?: throw IllegalStateException("Comanda ainda não sincronizada — aguarde a conexão para fechar.")
+        val response = api.requestCloseTab(organizationId, serverId)
+        return writeTabFromServer(response, localOverride = tabLocalId).toDomain()
+    }
+
+    /** Desfaz requestCloseTab() — CLOSING -> OPEN. */
+    suspend fun cancelCloseTab(organizationId: Long, tabLocalId: String): Tab {
+        val serverId = tabDao.getTabByLocalId(tabLocalId)?.serverId
+            ?: throw IllegalStateException("Comanda ainda não sincronizada.")
+        val response = api.cancelCloseTab(organizationId, serverId)
         return writeTabFromServer(response, localOverride = tabLocalId).toDomain()
     }
 
@@ -580,7 +634,7 @@ class TabRepository @Inject constructor(
     }
 }
 
-enum class CancelItemOutcome { Success, RemovedLocalDraft, OfflineNotSupported, NotFound }
+enum class CancelItemOutcome { Success, RemovedLocalDraft, QueuedOffline, NotFound }
 
 private fun TabResponse.toEntity(): TabEntity = TabEntity(
     localId = "", // substituído pelo caller antes de gravar
@@ -597,7 +651,7 @@ private fun TabResponse.toEntity(): TabEntity = TabEntity(
 
 private fun TableResponse.toEntity(organizationId: Long, locationId: Long): VenueTableEntity = VenueTableEntity(
     serverId = id, organizationId = organizationId, locationId = locationId, nome = nome, capacidade = capacidade, active = active,
-    openTabServerId = openTab?.id, openTabCode = openTab?.publicCode, openTabTotalCents = openTab?.totalCents,
+    openTabServerId = openTab?.id, openTabCode = openTab?.publicCode, openTabStatus = openTab?.status, openTabTotalCents = openTab?.totalCents,
     openTabRemainingCents = openTab?.remainingCents, openTabCustomerName = openTab?.customerName,
     fetchedAtEpochMs = System.currentTimeMillis(),
 )
@@ -605,6 +659,7 @@ private fun TableResponse.toEntity(organizationId: Long, locationId: Long): Venu
 private fun VenueTableEntity.toDomain(): VenueTable = VenueTable(
     id = serverId, name = nome, capacity = capacidade, active = active,
     openTabId = openTabServerId, openTabCode = openTabCode,
+    openTabStatus = openTabStatus?.let { com.nokta.pos.comanda.domain.TabStatus.parse(it) },
     openTabTotal = openTabTotalCents?.let { Money(it) }, openTabRemaining = openTabRemainingCents?.let { Money(it) },
     openTabCustomerName = openTabCustomerName,
 )
@@ -622,7 +677,7 @@ private fun TabEntity.toDomain(items: List<TabItem>, payments: List<TabPayment>)
         localId = localId, serverId = serverId, negativeLocalId = negativeIdFromLocalId(localId),
         organizationId = organizationId, locationId = locationId, publicCode = publicCode ?: "…",
         type = TabType.entries.firstOrNull { it.name == type } ?: TabType.INDIVIDUAL,
-        status = TabStatus.entries.firstOrNull { it.name == status } ?: TabStatus.OPEN,
+        status = TabStatus.parse(status),
         customerName = customerName, customerPhone = customerPhone,
         tableId = tableServerId, tableName = tableName, guestCount = guestCount,
         subtotal = Money(subtotalCents), discount = Money(discountCents), serviceCharge = Money(serviceChargeCents),

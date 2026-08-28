@@ -62,6 +62,8 @@ fun ComandaScreen(
                     onAddProducts = onAddProducts,
                     onCheckout = onCheckout,
                     onCloseTab = viewModel::closeTab,
+                    onRequestClose = viewModel::requestClose,
+                    onCancelClose = viewModel::cancelClose,
                 )
             }
         },
@@ -118,6 +120,18 @@ private fun ComandaContent(
     ) {
         Spacer(Modifier.height(8.dp))
         BalanceCard(tab)
+
+        when (tab.status) {
+            com.nokta.pos.comanda.domain.TabStatus.CLOSING -> {
+                Spacer(Modifier.height(12.dp))
+                PosInlineWarning("Fechando a conta — consumo travado, ainda sem pagamento registrado.")
+            }
+            com.nokta.pos.comanda.domain.TabStatus.PAYMENT_IN_PROGRESS -> {
+                Spacer(Modifier.height(12.dp))
+                PosInlineWarning("Recebendo pagamento — consumo travado até quitar ou cancelar o pagamento.")
+            }
+            else -> Unit
+        }
 
         if (tab.pendingItemCount > 0) {
             Spacer(Modifier.height(12.dp))
@@ -300,12 +314,16 @@ private fun ComandaActionBar(
     onAddProducts: () -> Unit,
     onCheckout: () -> Unit,
     onCloseTab: () -> Unit,
+    onRequestClose: () -> Unit,
+    onCancelClose: () -> Unit,
 ) {
     Surface(shadowElevation = 8.dp) {
         Column(Modifier.padding(16.dp)) {
             when {
-                // Quitada: só falta encerrar a comanda e liberar a mesa.
-                tab.isFullyPaid && tab.isOpen -> PosPrimaryButton(
+                // Quitada (mesmo se já passou por "fechar a conta" explícito
+                // — PAYMENT_IN_PROGRESS/CLOSING): só falta encerrar e liberar
+                // a mesa.
+                tab.isFullyPaid && tab.isOccupying -> PosPrimaryButton(
                     text = "Encerrar comanda",
                     onClick = onCloseTab,
                     loading = isClosing,
@@ -317,9 +335,22 @@ private fun ComandaActionBar(
                 )
                 else -> PosInlineWarning("Seu perfil não registra pagamentos. Chame o caixa para fechar.")
             }
-            if (canAddItems && tab.isOpen) {
+            if (canAddItems && tab.isEditable) {
                 Spacer(Modifier.height(10.dp))
                 PosSecondaryButton(text = "Adicionar itens", onClick = onAddProducts, icon = Icons.Filled.Add)
+            }
+            // "Fechar a conta" é opcional (ver ComandaViewModel.requestClose)
+            // — trava o consumo antes de cobrar, útil para o cliente ver o
+            // total fechado antes de decidir a forma de pagamento. Cobrar
+            // direto sem passar por aqui (botão "Pagar" acima) continua
+            // funcionando normalmente.
+            if (canTakePayments && tab.isEditable && !tab.isFullyPaid) {
+                Spacer(Modifier.height(10.dp))
+                PosSecondaryButton(text = "Fechar a conta", onClick = onRequestClose)
+            }
+            if (tab.status == com.nokta.pos.comanda.domain.TabStatus.CLOSING) {
+                Spacer(Modifier.height(10.dp))
+                PosSecondaryButton(text = "Cancelar fechamento", onClick = onCancelClose)
             }
         }
     }

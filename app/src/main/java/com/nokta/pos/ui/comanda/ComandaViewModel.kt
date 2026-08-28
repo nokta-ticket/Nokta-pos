@@ -124,7 +124,7 @@ class ComandaViewModel @Inject constructor(
                     val message = when (outcome) {
                         CancelItemOutcome.Success -> "Item cancelado."
                         CancelItemOutcome.RemovedLocalDraft -> "Item removido (ainda não havia sido confirmado)."
-                        CancelItemOutcome.OfflineNotSupported -> "Sem conexão — tente cancelar novamente quando a internet voltar."
+                        CancelItemOutcome.QueuedOffline -> "Item cancelado — será sincronizado quando a internet voltar."
                         CancelItemOutcome.NotFound -> "Item não encontrado."
                     }
                     _state.value = _state.value.copy(isCancelingItem = false, itemPendingCancel = null, actionMessage = message)
@@ -155,7 +155,7 @@ class ComandaViewModel @Inject constructor(
         val tab = tabRepository.getCachedTab(tabLocalId) ?: return
         val allCanceled = tab.items.isNotEmpty() && tab.activeItems.isEmpty()
         if (tab.type != com.nokta.pos.comanda.domain.TabType.COUNTER) return
-        if (!tab.isOpen || !allCanceled || tab.paid.isPositive()) return
+        if (!tab.isEditable || !allCanceled || tab.paid.isPositive()) return
 
         val organizationId = authRepository.currentOrganizationId() ?: return
         runCatching { tabRepository.closeTab(organizationId, tabLocalId) }
@@ -188,6 +188,36 @@ class ComandaViewModel @Inject constructor(
                         isClosing = false,
                         actionMessage = e.message ?: "Não foi possível fechar a comanda.",
                     )
+                }
+        }
+    }
+
+    /**
+     * Início do fechamento explícito ("pedir a conta") — opcional, trava o
+     * consumo (novos itens/cancelamento/desconto) antes de cobrar. Cobrar
+     * direto sem passar por aqui continua funcionando (closeTab acima).
+     */
+    fun requestClose() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        if (_state.value.tab?.isEditable != true) return
+
+        viewModelScope.launch {
+            runCatching { tabRepository.requestCloseTab(organizationId, tabLocalId) }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(actionMessage = e.message ?: "Não foi possível iniciar o fechamento.")
+                }
+        }
+    }
+
+    /** Desfaz requestClose() — volta a comanda para OPEN, editável de novo. */
+    fun cancelClose() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        if (_state.value.tab?.status != com.nokta.pos.comanda.domain.TabStatus.CLOSING) return
+
+        viewModelScope.launch {
+            runCatching { tabRepository.cancelCloseTab(organizationId, tabLocalId) }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(actionMessage = e.message ?: "Não foi possível cancelar o fechamento.")
                 }
         }
     }

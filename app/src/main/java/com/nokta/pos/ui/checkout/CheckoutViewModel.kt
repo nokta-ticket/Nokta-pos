@@ -209,8 +209,8 @@ class CheckoutViewModel @Inject constructor(
         val organizationId = authRepository.currentOrganizationId() ?: return
         viewModelScope.launch {
             val outcome = tabRepository.decreaseItemQuantity(organizationId, item)
-            if (outcome == CancelItemOutcome.OfflineNotSupported) {
-                _state.value = _state.value.copy(paymentMessage = "Sem conexão: não é possível remover item já confirmado no servidor agora. Tente de novo com internet.")
+            if (outcome == CancelItemOutcome.QueuedOffline) {
+                _state.value = _state.value.copy(paymentMessage = "Sem conexão: item ajustado localmente, será sincronizado quando a internet voltar.")
             } else if (outcome == CancelItemOutcome.NotFound) {
                 _state.value = _state.value.copy(paymentMessage = "Item não encontrado — pode já ter sido removido.")
             }

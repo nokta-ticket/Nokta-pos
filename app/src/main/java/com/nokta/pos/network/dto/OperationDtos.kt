@@ -75,6 +75,7 @@ data class TableOpenTabResponse(
     val id: Long,
     val publicCode: String? = null,
     val type: String? = null,
+    val status: String? = null,
     val totalCents: Long = 0,
     val paidCents: Long = 0,
     val remainingCents: Long = 0,
@@ -122,6 +123,15 @@ data class CreateOrderRequest(
 /** `reason` é obrigatório no backend — cancelamento sempre fica auditado com o motivo. */
 @Serializable
 data class CancelOrderItemRequest(val reason: String)
+
+/**
+ * Payload do Outbox para [com.nokta.pos.data.local.entity.OutboxOperationType.CANCEL_ITEM]
+ * — carrega o `itemServerId` junto (vai no path da chamada real, não no
+ * corpo), diferente de [CancelOrderItemRequest], que só tem o que o backend
+ * espera no corpo do POST.
+ */
+@Serializable
+data class CancelItemOutboxPayload(val itemServerId: Long, val reason: String)
 
 @Serializable
 data class OrderItemModifierResponse(
