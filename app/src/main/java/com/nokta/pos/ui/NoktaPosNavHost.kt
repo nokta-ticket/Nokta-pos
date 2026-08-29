@@ -14,8 +14,8 @@ import com.nokta.pos.session.DeviceEvents
 import com.nokta.pos.session.SessionEvents
 import com.nokta.pos.ui.cardapio.CardapioScreen
 import com.nokta.pos.ui.checkout.CheckoutScreen
-import com.nokta.pos.ui.comanda.BuscarComandaScreen
 import com.nokta.pos.ui.comanda.ComandaScreen
+import com.nokta.pos.ui.comanda.ComandasScreen
 import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.historico.HistoricoScreen
 import com.nokta.pos.ui.home.HomeScreen
@@ -154,7 +154,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         }
 
         composable(Routes.BUSCAR_COMANDA) {
-            BuscarComandaScreen(
+            ComandasScreen(
                 onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onBack = { navController.popBackStack() },
             )
