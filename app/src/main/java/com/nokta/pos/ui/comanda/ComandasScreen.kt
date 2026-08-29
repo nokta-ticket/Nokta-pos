@@ -114,13 +114,14 @@ private val openedAtFormatter = DateTimeFormatter.ofPattern("HH:mm")
 fun ComandasScreen(
     onOpenTab: (String) -> Unit,
     onBack: () -> Unit,
+    onAddComanda: () -> Unit,
     viewModel: ComandasViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
 
     Column(Modifier.fillMaxSize().background(NoktaSurface)) {
 
-        TopBar(onBack = onBack, onAdd = viewModel::openNovaComandaForm)
+        TopBar(onBack = onBack, onAdd = onAddComanda)
 
         Column(Modifier.padding(horizontal = ComandasDim.ScreenPad)) {
 

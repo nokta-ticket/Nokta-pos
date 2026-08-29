@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -21,6 +24,8 @@ import com.nokta.pos.ui.historico.HistoricoScreen
 import com.nokta.pos.ui.home.HomeScreen
 import com.nokta.pos.ui.login.LoginScreen
 import com.nokta.pos.ui.mesa.MesasScreen
+import com.nokta.pos.ui.orders.ComandaType
+import com.nokta.pos.ui.orders.OpenComandaScreen
 import com.nokta.pos.ui.pairing.PairingScreen
 import com.nokta.pos.ui.splash.SplashViewModel
 import com.nokta.pos.ui.splash.StartDestination
@@ -34,6 +39,7 @@ object Routes {
     const val NOVA_VENDA = "nova-venda"
     const val MESAS = "mesas"
     const val BUSCAR_COMANDA = "buscar-comanda"
+    const val ABRIR_COMANDA = "abrir-comanda"
     const val HISTORICO = "historico"
     const val COMANDA = "comanda/{tabId}"
     const val CARDAPIO = "cardapio/{tabId}"
@@ -157,6 +163,23 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             ComandasScreen(
                 onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onBack = { navController.popBackStack() },
+                onAddComanda = { navController.navigate(Routes.ABRIR_COMANDA) },
+            )
+        }
+
+        // Tela ainda sem lógica de vinculação (backend/regra de negócio em
+        // definição) — por ora só a navegação e o estado local de
+        // tipo/código, ver OpenComandaScreen.
+        composable(Routes.ABRIR_COMANDA) {
+            var type by remember { mutableStateOf(ComandaType.WRISTBAND) }
+            var code by remember { mutableStateOf("") }
+            OpenComandaScreen(
+                selectedType = type,
+                code = code,
+                onSelectType = { type = it; code = "" },
+                onCodeChange = { code = it },
+                onBack = { navController.popBackStack() },
+                onContinue = { /* TODO: vinculação de comanda por pulseira/cartão físico */ },
             )
         }
 
