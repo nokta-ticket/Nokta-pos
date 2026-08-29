@@ -192,7 +192,7 @@ fun HomeContent(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Outlined.ReceiptLong,
                         title = "Comandas",
-                        subtitle = "Consultar por número\nou cliente",
+                        subtitle = "Abrir e consultar por\npulseira ou cartão",
                         enabled = access.canViewTabs,
                         onClick = onComandas,
                     )
