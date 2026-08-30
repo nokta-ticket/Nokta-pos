@@ -18,7 +18,6 @@ import com.nokta.pos.session.SessionEvents
 import com.nokta.pos.ui.cardapio.CardapioScreen
 import com.nokta.pos.ui.checkout.CheckoutScreen
 import com.nokta.pos.ui.comanda.ComandaScreen
-import com.nokta.pos.ui.comanda.ComandasScreen
 import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.historico.HistoricoScreen
 import com.nokta.pos.ui.home.HomeScreen
@@ -39,7 +38,6 @@ object Routes {
     const val NOVA_VENDA = "nova-venda"
     const val MESAS = "mesas"
     const val BUSCAR_COMANDA = "buscar-comanda"
-    const val ABRIR_COMANDA = "abrir-comanda"
     const val HISTORICO = "historico"
     const val COMANDA = "comanda/{tabId}"
     const val CARDAPIO = "cardapio/{tabId}"
@@ -159,18 +157,11 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             )
         }
 
-        composable(Routes.BUSCAR_COMANDA) {
-            ComandasScreen(
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
-                onBack = { navController.popBackStack() },
-                onAddComanda = { navController.navigate(Routes.ABRIR_COMANDA) },
-            )
-        }
-
-        // Tela ainda sem lógica de vinculação (backend/regra de negócio em
+        // Ainda sem lógica de vinculação (backend/regra de negócio em
         // definição) — por ora só a navegação e o estado local de
-        // tipo/código, ver OpenComandaScreen.
-        composable(Routes.ABRIR_COMANDA) {
+        // tipo/código, ver OpenComandaScreen. A lista antiga de comandas
+        // (Abertas/Encerradas, ComandasScreen) saiu da navegação por ora.
+        composable(Routes.BUSCAR_COMANDA) {
             var type by remember { mutableStateOf(ComandaType.WRISTBAND) }
             var code by remember { mutableStateOf("") }
             OpenComandaScreen(
