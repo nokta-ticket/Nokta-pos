@@ -1,5 +1,6 @@
 package com.nokta.pos.device
 
+import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -15,6 +16,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val HEARTBEAT_INTERVAL_MS = 20_000L
+private const val TAG = "DeviceHeartbeat"
 
 /**
  * Mantém `lastSeenAt` do terminal atualizado enquanto o app está em
@@ -56,6 +58,8 @@ class DeviceHeartbeatCoordinator @Inject constructor(
             while (isActive) {
                 if (credentialsStore.isPaired()) {
                     runCatching { api.getDeviceStatus() }
+                        .onSuccess { Log.d(TAG, "loop: heartbeat ok") }
+                        .onFailure { Log.w(TAG, "loop: heartbeat falhou (lastSeenAt não avança)", it) }
                 }
                 delay(HEARTBEAT_INTERVAL_MS)
             }

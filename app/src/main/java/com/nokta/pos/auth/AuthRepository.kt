@@ -1,6 +1,7 @@
 package com.nokta.pos.auth
 
 import android.os.SystemClock
+import android.util.Log
 import com.nokta.pos.access.OperatorAccess
 import com.nokta.pos.device.DeviceCredentialsStore
 import com.nokta.pos.network.NoktaApi
@@ -10,6 +11,8 @@ import com.nokta.pos.network.humanizedApiMessage
 import com.nokta.pos.session.DeviceEvents
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "DeviceHeartbeat"
 
 /**
  * Instante (epoch millis) em que o kernel atual deu boot — constante durante
@@ -245,10 +248,20 @@ class AuthRepository @Inject constructor(
      */
     suspend fun checkDeviceStatus() {
         val result = runCatching { api.getDeviceStatus() }
-        val httpCode = (result.exceptionOrNull() as? retrofit2.HttpException)?.code()
+        val error = result.exceptionOrNull()
+        val httpCode = (error as? retrofit2.HttpException)?.code()
         if (httpCode == 401 || httpCode == 403) {
+            Log.w(TAG, "checkDeviceStatus: terminal revogado pelo servidor (HTTP $httpCode)")
             credentialsStore.clearDeviceToken()
             deviceEvents.notifyRevoked()
+        } else if (error != null) {
+            // Best-effort de propósito (ver doc acima) — nunca vira "revogado" por
+            // engano. Só log, pra não ficar adivinhando na próxima vez que
+            // lastSeenAt ficar parado sem explicação (ex.: rede do emulador
+            // ainda não pronta no boot).
+            Log.w(TAG, "checkDeviceStatus: falhou sem confirmar revogação (lastSeenAt não avança)", error)
+        } else {
+            Log.d(TAG, "checkDeviceStatus: heartbeat ok")
         }
     }
 }
