@@ -1,10 +1,9 @@
 package com.nokta.pos.device
 
-import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.nokta.pos.network.NoktaApi
+import com.nokta.pos.auth.AuthRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,7 +15,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val HEARTBEAT_INTERVAL_MS = 20_000L
-private const val TAG = "DeviceHeartbeat"
 
 /**
  * Mantém `lastSeenAt` do terminal atualizado enquanto o app está em
@@ -32,16 +30,21 @@ private const val TAG = "DeviceHeartbeat"
  * falha isolada de rede não derruba o status; só 3 falhas seguidas (60s
  * inteiros sem nenhum ping bem-sucedido) reproduzem o "Desconectado" real.
  *
- * `GET venue-devices/me` é reaproveitado de propósito (já existe, já é
- * exatamente "confirma o token e atualiza lastSeenAt", nunca precisa de
- * endpoint novo). Falha (sem rede, terminal revogado) é sempre ignorada
- * aqui — não é responsabilidade deste coordinator decidir navegação; quem
- * cuida de terminal revogado é `AuthRepository.checkDeviceStatus`
- * (disparado no boot) e o interceptor de 401/403 das rotas normais.
+ * Reaproveita `AuthRepository.checkDeviceStatus()` (não chama a API direto):
+ * é o mesmo `GET venue-devices/me` já usado no boot, mas agora com a MESMA
+ * decisão de revogação nos dois lugares — antes, só a chamada do boot
+ * limpava o token/disparava `DeviceEvents.notifyRevoked()` num 401/403; se
+ * essa chamada específica falhasse por qualquer motivo (ex.: coroutine
+ * cancelada por recomposição/navegação antes de processar a resposta), o
+ * app nunca mais detectava a revogação pelo resto da sessão, mesmo o
+ * servidor devolvendo 403 a cada heartbeat pra sempre — bug real
+ * reproduzido em 2026-08-30 (terminal revogado no backend, app preso em
+ * LOGIN sem nunca cair pra PAIRING). Falha que não é 401/403 (sem rede,
+ * timeout, 5xx) continua sendo ignorada, ver doc de `checkDeviceStatus`.
  */
 @Singleton
 class DeviceHeartbeatCoordinator @Inject constructor(
-    private val api: NoktaApi,
+    private val authRepository: AuthRepository,
     private val credentialsStore: DeviceCredentialsStore,
 ) : DefaultLifecycleObserver {
 
@@ -57,9 +60,7 @@ class DeviceHeartbeatCoordinator @Inject constructor(
         loopJob = scope.launch {
             while (isActive) {
                 if (credentialsStore.isPaired()) {
-                    runCatching { api.getDeviceStatus() }
-                        .onSuccess { Log.d(TAG, "loop: heartbeat ok") }
-                        .onFailure { Log.w(TAG, "loop: heartbeat falhou (lastSeenAt não avança)", it) }
+                    authRepository.checkDeviceStatus()
                 }
                 delay(HEARTBEAT_INTERVAL_MS)
             }
