@@ -12,7 +12,7 @@ data class CashStatusResponse(val isOpen: Boolean)
 
 @Serializable
 data class CreateTabRequest(
-    val type: String, // TABLE | INDIVIDUAL | COUNTER
+    val type: String, // TABLE | INDIVIDUAL | COUNTER | WRISTBAND
     val tableId: Long? = null,
     /**
      * Número/nome digitado na hora pelo garçom — não existe cadastro prévio
@@ -32,6 +32,8 @@ data class CreateTabRequest(
      * uma segunda comanda: o backend devolve a já criada.
      */
     val clientRequestId: String? = null,
+    /** Obrigatório quando type=WRISTBAND — número já impresso na pulseira física. */
+    val publicCode: String? = null,
 )
 
 @Serializable
@@ -69,7 +71,35 @@ data class TabResponse(
     val openedAt: String? = null,
     val orders: List<OrderResponse> = emptyList(),
     val payments: List<PaymentResponse> = emptyList(),
+    /**
+     * Presente (não-null) quando esta comanda foi aberta pelo fluxo de
+     * "Cartão físico" (`TAB_DETAIL_INCLUDE`/`list()`, backend
+     * `venue-tabs.service.ts`) — só o vínculo importa aqui, nunca o objeto
+     * completo do cartão. `type` sozinho não distingue isso: uma comanda
+     * de cartão físico nasce `INDIVIDUAL`, o mesmo tipo de uma comanda
+     * avulsa aberta por outro meio.
+     */
+    val physicalCard: TabPhysicalCardRef? = null,
 )
+
+@Serializable
+data class TabPhysicalCardRef(val id: Long)
+
+// ---- Pulseira/Cartão físico (fluxo simplificado de Comandas) ----
+
+/** `GET locations/:id/physical-code/:kind/:publicCode`. Discriminado por [kind]: TAB traz [tab] preenchido, CARD_AVAILABLE traz [card]. */
+@Serializable
+data class ResolvePhysicalCodeResponse(
+    val kind: String, // TAB | CARD_AVAILABLE
+    val tab: TabResponse? = null,
+    val card: PhysicalCardResponse? = null,
+)
+
+@Serializable
+data class PhysicalCardResponse(val id: Long, val publicCode: String)
+
+@Serializable
+data class BindPhysicalCardRequest(val customerName: String, val customerPhone: String)
 
 // ---- Mesa (VenueTable) ----
 

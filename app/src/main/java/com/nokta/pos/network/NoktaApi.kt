@@ -100,6 +100,30 @@ interface NoktaApi {
         @Query("search") search: String? = null,
     ): List<TabResponse>
 
+    /**
+     * Tela "Comandas" simplificada: digita o número + o tipo (WRISTBAND ou
+     * CARD), o backend decide — abre direto (pulseira sempre; cartão já
+     * vinculado) ou sinaliza que precisa vincular cliente (cartão
+     * disponível). Pulseira nasce implicitamente aqui, sem endpoint de
+     * criação separado.
+     */
+    @GET("organizations/{orgId}/venue/operation/locations/{locationId}/physical-code/{kind}/{publicCode}")
+    suspend fun resolvePhysicalCode(
+        @Path("orgId") organizationId: Long,
+        @Path("locationId") locationId: Long,
+        @Path("kind") kind: String,
+        @Path("publicCode") publicCode: String,
+    ): ResolvePhysicalCodeResponse
+
+    /** Vincula nome+telefone a um cartão AVAILABLE, abrindo a comanda. */
+    @POST("organizations/{orgId}/venue/operation/locations/{locationId}/physical-cards/{cardId}/bind")
+    suspend fun bindPhysicalCard(
+        @Path("orgId") organizationId: Long,
+        @Path("locationId") locationId: Long,
+        @Path("cardId") cardId: Long,
+        @Body body: BindPhysicalCardRequest,
+    ): TabResponse
+
     // ---- Caixa ----
 
     /**

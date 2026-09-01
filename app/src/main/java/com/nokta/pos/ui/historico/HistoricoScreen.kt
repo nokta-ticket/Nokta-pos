@@ -115,6 +115,7 @@ private fun HistoricoRow(tab: Tab, onClick: () -> Unit) {
                             TabType.COUNTER -> "Balcão"
                             TabType.TABLE -> "Mesa"
                             TabType.INDIVIDUAL -> "Comanda"
+                            TabType.WRISTBAND -> "Pulseira"
                         },
                     )
                     val count = tab.activeItems.sumOf { it.quantity }

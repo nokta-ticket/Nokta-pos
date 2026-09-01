@@ -298,6 +298,50 @@ class TabRepository @Inject constructor(
         syncEngine.requestSync()
     }
 
+    /**
+     * Resultado de [resolvePhysicalCode]: TAB abre o detalhamento direto
+     * (pulseira sempre; cartão já vinculado a um cliente). CardAvailable
+     * pede nome+telefone antes de abrir de verdade (ver [bindPhysicalCard]).
+     */
+    sealed class PhysicalCodeResult {
+        data class OpenedTab(val tab: Tab) : PhysicalCodeResult()
+        data class CardAvailable(val cardId: Long, val publicCode: String) : PhysicalCodeResult()
+    }
+
+    /**
+     * Tela "Comandas" simplificada (pulseira/cartão): deliberadamente
+     * ONLINE-ONLY, ao contrário de [openTab] — decidir "esta pulseira já
+     * tem atendimento?"/"este cartão está disponível?" exige o servidor
+     * como fonte de verdade; criar isso offline arriscaria dois terminais
+     * offline abrindo o mesmo publicCode em paralelo sem nenhum jeito de
+     * detectar o conflito até a rede voltar. `connectivityChecker` é
+     * responsabilidade do caller (ViewModel) checar ANTES de chamar isto,
+     * pra mostrar um aviso claro em vez de deixar a chamada estourar
+     * IOException — mas a função também nunca finge sucesso offline.
+     */
+    suspend fun resolvePhysicalCode(organizationId: Long, locationId: Long, kind: String, publicCode: String): PhysicalCodeResult {
+        val response = api.resolvePhysicalCode(organizationId, locationId, kind, publicCode)
+        return when (response.kind) {
+            "TAB" -> {
+                val tabResponse = response.tab ?: throw IllegalStateException("Resposta TAB sem tab.")
+                val localId = tabDao.getTabByServerId(tabResponse.id)?.localId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+                PhysicalCodeResult.OpenedTab(writeTabFromServer(tabResponse, localOverride = localId).toDomain())
+            }
+            "CARD_AVAILABLE" -> {
+                val card = response.card ?: throw IllegalStateException("Resposta CARD_AVAILABLE sem card.")
+                PhysicalCodeResult.CardAvailable(card.id, card.publicCode)
+            }
+            else -> throw IllegalStateException("kind desconhecido: ${response.kind}")
+        }
+    }
+
+    /** Vincula cliente a um cartão AVAILABLE, abrindo a comanda — mesma natureza online-only de [resolvePhysicalCode]. */
+    suspend fun bindPhysicalCard(organizationId: Long, locationId: Long, cardId: Long, customerName: String, customerPhone: String): Tab {
+        val response = api.bindPhysicalCard(organizationId, locationId, cardId, com.nokta.pos.network.dto.BindPhysicalCardRequest(customerName, customerPhone))
+        val localId = tabDao.getTabByServerId(response.id)?.localId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+        return writeTabFromServer(response, localOverride = localId).toDomain()
+    }
+
     suspend fun getTab(organizationId: Long, localId: String): Tab {
         try {
             val local = tabDao.getTabByLocalId(localId)
@@ -646,6 +690,7 @@ private fun TabResponse.toEntity(): TabEntity = TabEntity(
     totalCents = totalCents, paidCents = paidCents, remainingCents = remainingCents,
     openedAt = openedAt, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = System.currentTimeMillis(),
     createdAtEpochMs = System.currentTimeMillis(),
+    isPhysicalCard = physicalCard != null,
 )
 
 private fun TableResponse.toEntity(organizationId: Long, locationId: Long): VenueTableEntity = VenueTableEntity(
@@ -684,6 +729,7 @@ private fun TabEntity.toDomain(items: List<TabItem>, payments: List<TabPayment>)
         total = Money(totalCents), paid = Money(paidCents), remaining = Money(remainingCents),
         openedAt = openedAt, items = items, payments = payments,
         syncState = when (syncState) { SyncState.SYNCED -> LocalSyncState.SYNCED; SyncState.PENDING -> LocalSyncState.PENDING; SyncState.FAILED -> LocalSyncState.FAILED },
+        isPhysicalCard = isPhysicalCard,
     )
 }
 

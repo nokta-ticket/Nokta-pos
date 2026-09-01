@@ -18,7 +18,7 @@ fun negativeIdFromLocalId(localId: String): Long {
     return -(magnitude and Long.MAX_VALUE) - 1L
 }
 
-enum class TabType { TABLE, INDIVIDUAL, COUNTER }
+enum class TabType { TABLE, INDIVIDUAL, COUNTER, WRISTBAND }
 
 /**
  * OPEN -> CLOSING -> PAYMENT_IN_PROGRESS -> CLOSED é o caminho de "fechar a
@@ -204,6 +204,8 @@ data class Tab(
     val items: List<TabItem> = emptyList(),
     val payments: List<TabPayment> = emptyList(),
     val syncState: LocalSyncState = LocalSyncState.SYNCED,
+    /** Comanda aberta pelo fluxo "Cartão físico" — ver TabEntity.isPhysicalCard. */
+    val isPhysicalCard: Boolean = false,
 ) {
     val id: Long get() = serverId ?: negativeLocalId
 
@@ -233,6 +235,7 @@ data class Tab(
             tableName != null -> "Mesa $tableName"
             type == TabType.TABLE -> "Mesa"
             type == TabType.COUNTER -> "Balcão $publicCode"
+            type == TabType.WRISTBAND -> "Pulseira $publicCode"
             else -> "Comanda $publicCode"
         }
 }

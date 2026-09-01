@@ -423,6 +423,9 @@ private class FakeNoktaApi : NoktaApi {
     override suspend fun getTab(organizationId: Long, tabId: Long): TabResponse =
         getTabResponse?.invoke(tabId) ?: error("getTabResponse não configurado")
 
+    override suspend fun resolvePhysicalCode(organizationId: Long, locationId: Long, kind: String, publicCode: String): com.nokta.pos.network.dto.ResolvePhysicalCodeResponse = error("not used")
+    override suspend fun bindPhysicalCard(organizationId: Long, locationId: Long, cardId: Long, body: com.nokta.pos.network.dto.BindPhysicalCardRequest): TabResponse = error("not used")
+
     override suspend fun getTabByPublicCode(organizationId: Long, locationId: Long, publicCode: String): TabResponse = error("not used")
     override suspend fun closeTab(organizationId: Long, tabId: Long): TabResponse = error("not used")
     override suspend fun requestCloseTab(organizationId: Long, tabId: Long): TabResponse = error("not used")

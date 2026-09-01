@@ -60,6 +60,15 @@ data class TabEntity(
     /** Quando esta linha foi vista pela última vez confirmada pelo servidor. */
     val lastSyncedAtEpochMs: Long?,
     val createdAtEpochMs: Long,
+    /**
+     * Comanda aberta pelo fluxo "Cartão físico" da tela Comandas
+     * (TabResponse.physicalCard != null) — `type` sozinho não distingue
+     * isso, uma comanda de cartão nasce INDIVIDUAL, mesmo tipo de uma
+     * aberta por outro meio. Default `false`: comandas gravadas antes deste
+     * campo existir (offline, ainda não resync) nunca aparecem por engano
+     * na aba Cartão físico.
+     */
+    val isPhysicalCard: Boolean = false,
 )
 
 @Entity(
