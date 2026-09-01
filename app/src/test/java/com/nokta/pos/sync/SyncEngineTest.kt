@@ -10,6 +10,9 @@ import com.nokta.pos.data.local.entity.OutboxOperationType
 import com.nokta.pos.data.local.entity.OutboxStatus
 import com.nokta.pos.data.local.entity.SyncState
 import com.nokta.pos.data.local.entity.TabEntity
+import com.nokta.pos.data.local.entity.TabItemEntity
+import com.nokta.pos.data.local.entity.TabOrderEntity
+import com.nokta.pos.data.local.entity.TabPaymentEntity
 import com.nokta.pos.network.NoktaApi
 import com.nokta.pos.network.dto.CreateOrderItemRequest
 import com.nokta.pos.network.dto.CreateOrderRequest
@@ -26,6 +29,8 @@ import com.nokta.pos.network.dto.RedeemPairingCodeRequest
 import com.nokta.pos.network.dto.RedeemPairingCodeResponse
 import com.nokta.pos.network.dto.TabResponse
 import com.nokta.pos.network.dto.TableResponse
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -74,6 +79,31 @@ class SyncEngineTest {
     fun tearDown() { db.close() }
 
     private fun setNetworkOnline(online: Boolean) { connectivity.online = online }
+
+    /** Pedido local já gravado por `submitOrder`, com 1 item pendente (sem serverId) — o que `discardRejectedOrder` opera. */
+    private suspend fun seedPendingOrderItem(tabLocalId: String, orderLocalId: String, itemLocalId: String, lineTotalCents: Long) {
+        db.tabDao().upsertOrder(TabOrderEntity(localId = orderLocalId, serverId = null, tabLocalId = tabLocalId, status = "SENT", syncState = SyncState.PENDING, createdAtEpochMs = 1))
+        db.tabDao().upsertItem(
+            TabItemEntity(
+                localId = itemLocalId, serverId = null, tabLocalId = tabLocalId, orderLocalId = orderLocalId,
+                menuItemId = 1, variantId = 1, productName = "Budweiser", variantName = "269ml",
+                quantity = 1, unitPriceCents = lineTotalCents, modifiersTotalCents = 0, lineTotalCents = lineTotalCents,
+                status = "SENT", notes = null, modifiersJson = "[]", createdAtEpochMs = 1,
+            ),
+        )
+    }
+
+    /** Pagamento local gravado por `registerPayment`, cobrindo (ou não) o item pendente acima. */
+    private suspend fun seedPendingPayment(tabLocalId: String, paymentLocalId: String, amountCents: Long, coveredItemLocalIds: List<String>) {
+        db.tabDao().upsertPayment(
+            TabPaymentEntity(
+                localId = paymentLocalId, serverId = null, tabLocalId = tabLocalId, method = "CASH",
+                amountCents = amountCents, receivedCents = null, changeCents = null, isCanceled = false,
+                externalReference = null, confirmedAt = null, syncState = SyncState.PENDING, createdAtEpochMs = 1,
+                coveredPendingItemIdsJson = if (coveredItemLocalIds.isEmpty()) null else json.encodeToString(coveredItemLocalIds),
+            ),
+        )
+    }
 
     private fun tabDraft(localId: String) = TabEntity(
         localId = localId, serverId = null, organizationId = 1, locationId = 1,
@@ -348,6 +378,128 @@ class SyncEngineTest {
         assertTrue(db.outboxDao().getPending().isEmpty())
     }
 
+    // ------------------------------------------------------------------
+    // Reconciliação de pagamento x item recusado (Fase 1 desta conversa) —
+    // discardRejectedOrder/markPaymentRejected, sem cobertura até aqui.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `SEND_ORDER rejeitado SEM pagamento cobrindo o item nao gera reconciliacao`() = runTest {
+        // Caso comum: item recusado antes de qualquer cobrança — só descarta,
+        // igual ao comportamento anterior a esta mudança.
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+        seedPendingOrderItem(tabLocalId = "tab-1", orderLocalId = "order-1", itemLocalId = "item-1", lineTotalCents = 800)
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "order-1", type = OutboxOperationType.SEND_ORDER, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateOrderRequest(items = emptyList(), clientRequestId = "order-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.createOrderThrows = { HttpException(Response.error<Any>(409, okhttp3.ResponseBody.create(null, "produto indisponível"))) }
+
+        val events = mutableListOf<SyncEvent>()
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { engine.events.collect { events.add(it) } }
+
+        val result = engine.syncAll()
+        job.cancel()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.tabDao().getItemsByOrderLocalId("order-1").isEmpty()) // item descartado
+        assertTrue(db.tabDao().observePaymentReconciliations("tab-1").first().isEmpty())
+        assertTrue(events.none { it is SyncEvent.PaymentReconciliationRequired })
+    }
+
+    @Test
+    fun `SEND_ORDER rejeitado COM pagamento cobrindo o item gera reconciliacao, nunca ajusta o pagamento sozinho`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+        seedPendingOrderItem(tabLocalId = "tab-1", orderLocalId = "order-1", itemLocalId = "item-1", lineTotalCents = 800)
+        // O checkout já cobrou R$84 (servidor R$76 + este item pendente de R$8) — ver TabRepository.registerPayment.
+        seedPendingPayment(tabLocalId = "tab-1", paymentLocalId = "payment-1", amountCents = 8400, coveredItemLocalIds = listOf("item-1"))
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "order-1", type = OutboxOperationType.SEND_ORDER, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreateOrderRequest(items = emptyList(), clientRequestId = "order-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.createOrderThrows = { HttpException(Response.error<Any>(409, okhttp3.ResponseBody.create(null, "produto indisponível"))) }
+
+        val events = mutableListOf<SyncEvent>()
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { engine.events.collect { events.add(it) } }
+
+        val result = engine.syncAll()
+        job.cancel()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.tabDao().getItemsByOrderLocalId("order-1").isEmpty()) // item descartado, nunca fica fantasma
+
+        // Reconciliação registrada — visível, nunca silenciosa.
+        val reconciliations = db.tabDao().observePaymentReconciliations("tab-1").first()
+        assertEquals(1, reconciliations.size)
+        assertEquals("payment-1", reconciliations[0].paymentLocalId)
+        assertEquals(800L, reconciliations[0].rejectedItemAmountCents)
+        assertFalse(reconciliations[0].isResolved)
+
+        val reconciliationEvents = events.filterIsInstance<SyncEvent.PaymentReconciliationRequired>()
+        assertEquals(1, reconciliationEvents.size)
+        assertEquals(1, reconciliationEvents[0].count)
+
+        // O pagamento em si NUNCA é ajustado/apagado sozinho — continua
+        // gravado exatamente como estava, para o operador decidir o que fazer.
+        val payment = db.tabDao().getPaymentsForTab("tab-1").single { it.localId == "payment-1" }
+        assertEquals(8400L, payment.amountCents)
+        assertEquals(SyncState.PENDING, payment.syncState)
+    }
+
+    // ------------------------------------------------------------------
+    // REGISTER_PAYMENT rejeitado — o saldo que ele cobria precisa reabrir
+    // (Fase 2 desta conversa: markPaymentRejected), sem cobertura até aqui.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `REGISTER_PAYMENT rejeitado marca o pagamento local como REJECTED, nunca fica PENDING para sempre`() = runTest {
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        db.tabDao().updateTab(db.tabDao().getTabByLocalId("tab-1")!!.copy(serverId = 500, syncState = SyncState.SYNCED))
+        seedPendingPayment(tabLocalId = "tab-1", paymentLocalId = "payment-1", amountCents = 8400, coveredItemLocalIds = emptyList())
+
+        db.outboxDao().enqueue(
+            OutboxEntity(
+                operationId = "payment-1", type = OutboxOperationType.REGISTER_PAYMENT, organizationId = 1,
+                tabLocalId = "tab-1", payloadJson = json.encodeToString(CreatePaymentRequest(method = "CASH", amountCents = 8400, idempotencyKey = "payment-1")),
+                status = OutboxStatus.PENDING, retryCount = 0, lastError = null, createdAtEpochMs = 1, lastAttemptAtEpochMs = null,
+            ),
+        )
+        api.createPaymentThrows = { HttpException(Response.error<Any>(400, okhttp3.ResponseBody.create(null, """{"message":"O valor do pagamento não pode ultrapassar o saldo restante."}"""))) }
+
+        val result = engine.syncAll()
+
+        assertEquals(1, result.processed)
+        assertTrue(db.outboxDao().getPending().isEmpty())
+
+        val payment = db.tabDao().getPaymentsForTab("tab-1").single { it.localId == "payment-1" }
+        assertEquals(SyncState.REJECTED, payment.syncState)
+    }
+
+    @Test
+    fun `markPaymentRejected nunca regride um pagamento ja SYNCED`() = runTest {
+        // Guarda contra uma chamada tardia/duplicada: um pagamento que já
+        // sincronizou com sucesso não pode voltar a ficar REJECTED por
+        // qualquer race de processamento.
+        db.tabDao().upsertTab(tabDraft("tab-1"))
+        seedPendingPayment(tabLocalId = "tab-1", paymentLocalId = "payment-1", amountCents = 8400, coveredItemLocalIds = emptyList())
+        db.tabDao().updatePayment(db.tabDao().getPaymentsForTab("tab-1").single().copy(serverId = 999, syncState = SyncState.SYNCED))
+
+        db.tabDao().markPaymentRejected("payment-1")
+
+        val payment = db.tabDao().getPaymentsForTab("tab-1").single()
+        assertEquals(SyncState.SYNCED, payment.syncState)
+    }
+
     @Test
     fun `CLOSE_TAB no Outbox e sempre rejeitado — nunca enfileirado de verdade, decisao permanente`() = runTest {
         db.tabDao().upsertTab(tabDraft("tab-1"))
@@ -403,6 +555,7 @@ private class FakeNoktaApi : NoktaApi {
     var sendOrderThrows: (() -> Throwable)? = null
     var cancelOrderItemThrows: (() -> Throwable)? = null
     var createPaymentResponse: ((Long) -> PaymentResponse)? = null
+    var createPaymentThrows: (() -> Throwable)? = null
     var getTabResponse: ((Long) -> TabResponse)? = null
 
     override suspend fun redeemPairingCode(body: RedeemPairingCodeRequest): RedeemPairingCodeResponse = error("not used")
@@ -458,6 +611,7 @@ private class FakeNoktaApi : NoktaApi {
 
     override suspend fun createPayment(organizationId: Long, tabId: Long, body: CreatePaymentRequest): PaymentResponse {
         createPaymentCallCount++
+        createPaymentThrows?.invoke()?.let { throw it }
         return createPaymentResponse?.invoke(tabId) ?: error("createPaymentResponse não configurado")
     }
 }
