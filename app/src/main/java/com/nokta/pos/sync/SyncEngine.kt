@@ -119,6 +119,19 @@ class SyncEngine @Inject constructor(
                         }
                     }
 
+                    // Pagamento recusado (ex.: valor não bate mais com o saldo
+                    // real, produto que compunha a cobrança foi cancelado
+                    // nesse meio tempo etc.): o registro local `operationId ==
+                    // TabPaymentEntity.localId` (ver TabRepository.
+                    // registerPayment) fica marcado REJECTED em vez de
+                    // continuar PENDING para sempre — sem isto,
+                    // Tab.remainingWithPending seguiria contando esse valor
+                    // como já coberto, e o saldo nunca voltava a ficar
+                    // disponível para o operador cobrar de novo.
+                    if (operation.type == OutboxOperationType.REGISTER_PAYMENT) {
+                        tabDao.markPaymentRejected(operation.operationId)
+                    }
+
                     // Sem serverId, toda operação restante desta comanda
                     // (SEND_ORDER/REGISTER_PAYMENT, que dependem do serverId
                     // que só o CREATE_TAB cria) nunca teria como ser aceita —

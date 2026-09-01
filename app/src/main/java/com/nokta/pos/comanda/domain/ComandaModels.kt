@@ -91,8 +91,14 @@ data class TabItemModifier(val name: String, val quantity: Int, val total: Money
  * UI — não confundir com [OrderItemStatus]/[TabStatus] (estado OPERACIONAL,
  * sempre vindo do servidor). Isto é sobre "o terminal já confirmou isto com a
  * Nokta?", nunca sobre o andamento do pedido em si.
+ *
+ * `REJECTED`: recusa definitiva do servidor (4xx) — distinto de `FAILED`
+ * (falha transitória, ainda tenta de novo). Hoje só produzido para
+ * pagamento: um `TabPayment` recusado sai de [Tab.pendingPayments] e deixa
+ * de abater [Tab.remainingWithPending], porque o saldo que ele cobria nunca
+ * foi de fato aceito.
  */
-enum class LocalSyncState { SYNCED, PENDING, FAILED }
+enum class LocalSyncState { SYNCED, PENDING, FAILED, REJECTED }
 
 /**
  * Um item consumido. Guarda os SNAPSHOTS de nome e preço que o backend gravou
@@ -256,18 +262,16 @@ data class Tab(
     /** Total incluindo o consumo pendente — o que o cliente deve de fato agora. */
     val totalWithPending: Money get() = total + pendingConsumption
 
-    /** Saldo a cobrar incluindo o consumo pendente. */
-    val remainingWithPending: Money get() = remaining + pendingConsumption
-
     val hasPendingConsumption: Boolean get() = pendingConsumption.isPositive()
 
     /**
      * Pagamentos registrados NESTE terminal que ainda não foram confirmados
      * pelo servidor (`serverId == null` -> [LocalSyncState.PENDING]) — nunca
-     * cancelados. Só existe para a UI comunicar "já foi cobrado, aguardando
-     * sincronizar" (ver [ComandaScreen]); [paid]/[remaining] continuam vindo
-     * só do servidor, nunca recalculados a partir disto (mesma garantia do
-     * comentário desta classe: o app não decide sozinho quanto já foi pago).
+     * cancelados nem rejeitados. Só existe para a UI comunicar "já foi
+     * cobrado, aguardando sincronizar" (ver [ComandaScreen]); [paid] em si
+     * continua vindo só do servidor, nunca recalculado a partir disto (mesma
+     * garantia do comentário desta classe: o app não decide sozinho quanto o
+     * SERVIDOR já confirmou como pago).
      */
     val pendingPayments get() = payments.filter { it.syncState == LocalSyncState.PENDING && !it.isCanceled }
 
@@ -276,14 +280,33 @@ data class Tab(
     val hasPendingPayment: Boolean get() = pendingPayments.isNotEmpty()
 
     /**
+     * Saldo OPERACIONAL restante: quanto ainda pode ser cobrado agora, neste
+     * terminal — `total confirmado + consumo pendente − pago confirmado −
+     * pago pendente`. Um pagamento local ainda não sincronizado (PENDING) já
+     * abate este saldo, mesmo que o servidor não o conheça ainda: sem isso,
+     * nada impediria um segundo pagamento cobrindo o MESMO valor que o
+     * primeiro (ainda no Outbox) já cobre — cobrança duplicada local. A
+     * proteção contra dois TERMINAIS cobrando em dobro continua sendo a
+     * releitura de `remaining` do servidor (nenhum outro terminal enxerga um
+     * pagamento PENDING deste, que só existe no Room local); esta conta só
+     * evita duplicar dentro do MESMO terminal antes de sincronizar.
+     *
+     * Nunca fica negativo: `paid`/`pendingPaymentsTotal` nunca deveriam
+     * ultrapassar o total (o backend recusa pagamento acima do saldo — ver
+     * `venue-payments.service.ts`), mas `coerceAtLeast(ZERO)` evita um valor
+     * negativo confuso na tela por qualquer defasagem momentânea de sync.
+     */
+    val remainingWithPending: Money
+        get() = (totalWithPending - paid - pendingPaymentsTotal).coerceAtLeast(Money.ZERO)
+
+    /**
      * A conta já foi coberta do ponto de vista do OPERADOR — cobrou o valor
      * completo (com pendente), mesmo que o servidor ainda não tenha
      * confirmado nem o consumo nem o pagamento. Distinto de [isFullyPaid],
      * que exige confirmação real do servidor antes de permitir fechar a
      * comanda (`TabRepository.closeTab` sempre exige rede).
      */
-    val isSettledLocally: Boolean
-        get() = (paid + pendingPaymentsTotal).cents >= totalWithPending.cents
+    val isSettledLocally: Boolean get() = remainingWithPending.isZeroOrNegative()
 
     val isFullyPaid get() = remaining.isZeroOrNegative()
     val hasPartialPayment get() = paid.isPositive() && !isFullyPaid

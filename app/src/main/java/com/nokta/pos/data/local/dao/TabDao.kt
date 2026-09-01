@@ -249,6 +249,18 @@ interface TabDao {
     @Update
     suspend fun updatePayment(payment: TabPaymentEntity)
 
+    /**
+     * O servidor recusou definitivamente este pagamento (`REGISTER_PAYMENT`
+     * rejeitado — ver `SyncEngine`). Sem isto, o registro ficava `PENDING`
+     * para sempre: `Tab.remainingWithPending` continuava contando o valor
+     * como já coberto, então o saldo nunca voltava a ficar disponível para
+     * cobrar de novo. Só marca `REJECTED` se ainda estava `PENDING` — um
+     * pagamento que já sincronizou com sucesso (SYNCED) nunca deveria
+     * regredir por uma chamada tardia/duplicada.
+     */
+    @Query("UPDATE tab_payment SET syncState = 'REJECTED' WHERE localId = :paymentLocalId AND syncState = 'PENDING'")
+    suspend fun markPaymentRejected(paymentLocalId: String)
+
     // ---- Reconciliação de pagamento x item recusado ----
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

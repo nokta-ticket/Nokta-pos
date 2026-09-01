@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.nokta.pos.comanda.domain.LocalSyncState
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabItem
 import com.nokta.pos.comanda.domain.TabPayment
@@ -212,7 +213,12 @@ private fun ComandaContent(
     } else {
         tab.items.filter { it.productName.contains(query, ignoreCase = true) }
     }
-    val activePayments = tab.payments.filterNot { it.isCanceled }
+    // REJECTED nunca aparece aqui: já não conta para o saldo
+    // (Tab.remainingWithPending), então mostrá-lo como se fosse um pagamento
+    // válido enganaria o operador. O aviso de que foi recusado já chega pelo
+    // diálogo de sincronização (SyncEvent.OperationRejected) — não duplicar
+    // um "histórico de tentativa" aqui, que não existia antes desta mudança.
+    val activePayments = tab.payments.filterNot { it.isCanceled || it.syncState == LocalSyncState.REJECTED }
     var reconciliationBeingResolved by remember { mutableStateOf<com.nokta.pos.data.local.entity.PaymentReconciliationEntity?>(null) }
 
     Column(Modifier.fillMaxSize()) {
@@ -688,6 +694,13 @@ private fun PaymentRow(payment: TabPayment) {
             Text(payment.method.label, fontSize = 14.sp, color = NoktaInk)
             payment.change?.takeIf { it.isPositive() }?.let {
                 Text("Troco ${it.formatBRL()}", fontSize = 12.sp, color = NoktaMutedSoft)
+            }
+            // Ainda não confirmado pelo servidor — já conta para o saldo
+            // (Tab.remainingWithPending), mas o operador precisa saber que
+            // não é definitivo ainda, senão acha que já está tudo certo.
+            if (payment.syncState == LocalSyncState.PENDING) {
+                Spacer(Modifier.height(2.dp))
+                PosBadge("Aguardando confirmação", PosBadgeTone.WARNING)
             }
         }
         Text(payment.amount.formatBRL(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MoneyGreen)

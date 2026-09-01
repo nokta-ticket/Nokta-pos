@@ -31,7 +31,15 @@ data class PersistedModifier(val name: String, val quantity: Int, val totalCents
  * a URL de uma chamada HTTP, e só existe depois que o Outbox confirmou a
  * criação no backend.
  */
-enum class SyncState { SYNCED, PENDING, FAILED }
+/**
+ * `REJECTED`: o servidor recusou definitivamente esta operação (4xx) na
+ * sincronização — distinto de `FAILED` (falha transitória, ainda pode
+ * reenfileirar). Hoje usado só por pagamento (ver `TabPaymentEntity` /
+ * `SyncEngine`, branch `REGISTER_PAYMENT` rejeitado): o saldo que esse
+ * pagamento cobria precisa voltar a ficar em aberto, então o registro não
+ * pode continuar parecendo `PENDING` para sempre.
+ */
+enum class SyncState { SYNCED, PENDING, FAILED, REJECTED }
 
 @Entity(tableName = "tab", indices = [Index("serverId", unique = true)])
 data class TabEntity(

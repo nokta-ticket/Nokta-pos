@@ -794,7 +794,14 @@ private fun TabEntity.toDomain(items: List<TabItem>, payments: List<TabPayment>)
         serviceChargeRateBps = serviceChargeRateBps,
         total = Money(totalCents), paid = Money(paidCents), remaining = Money(remainingCents),
         openedAt = openedAt, items = items, payments = payments,
-        syncState = when (syncState) { SyncState.SYNCED -> LocalSyncState.SYNCED; SyncState.PENDING -> LocalSyncState.PENDING; SyncState.FAILED -> LocalSyncState.FAILED },
+        // REJECTED nunca se aplica à Tab em si (só a um TabPayment
+        // individual — ver toDomain() de TabPaymentEntity logo abaixo);
+        // cai em FAILED por não ter significado próprio de domínio aqui.
+        syncState = when (syncState) {
+            SyncState.SYNCED -> LocalSyncState.SYNCED
+            SyncState.PENDING -> LocalSyncState.PENDING
+            SyncState.FAILED, SyncState.REJECTED -> LocalSyncState.FAILED
+        },
         isPhysicalCard = isPhysicalCard,
         activeItemCountFromServer = activeItemCountFromServer,
     )
@@ -818,7 +825,17 @@ private fun TabPaymentEntity.toDomain(): TabPayment = TabPayment(
     localId = localId, serverId = serverId, method = PaymentMethodParse(method),
     amount = Money(amountCents), received = receivedCents?.let { Money(it) }, change = changeCents?.let { Money(it) },
     isCanceled = isCanceled, externalReference = externalReference, confirmedAt = confirmedAt,
-    syncState = if (serverId != null) LocalSyncState.SYNCED else LocalSyncState.PENDING,
+    // O campo REAL (syncState, gravado por markPaymentRejected/upsertPayment)
+    // manda — nunca inferir de novo a partir de serverId sozinho, que não
+    // distingue "ainda não sincronizou" de "sincronizou e foi recusado" (os
+    // dois têm serverId == null). Era esse bug: REJECTED gravado no Room
+    // virava PENDING de novo aqui, e o saldo nunca voltava a abrir.
+    syncState = when (syncState) {
+        SyncState.SYNCED -> LocalSyncState.SYNCED
+        SyncState.PENDING -> LocalSyncState.PENDING
+        SyncState.FAILED -> LocalSyncState.FAILED
+        SyncState.REJECTED -> LocalSyncState.REJECTED
+    },
 )
 
 private fun PaymentMethodParse(raw: String) = com.nokta.pos.comanda.domain.PaymentMethod.parse(raw)
