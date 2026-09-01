@@ -102,6 +102,7 @@ fun HomeScreen(
         onDismissCashClosedToast = viewModel::dismissCashClosedToast,
         onOpenCashWarning = viewModel::openCashWarningDialog,
         onDismissCashWarning = viewModel::dismissCashWarningDialog,
+        onDismissSyncRejection = viewModel::dismissSyncRejection,
     )
 }
 
@@ -136,6 +137,7 @@ fun HomeContent(
     onDismissCashClosedToast: () -> Unit = {},
     onOpenCashWarning: () -> Unit = {},
     onDismissCashWarning: () -> Unit = {},
+    onDismissSyncRejection: () -> Unit = {},
 ) {
     val access = state.access
 
@@ -264,6 +266,13 @@ fun HomeContent(
             CashWarningDialog(onDismiss = onDismissCashWarning)
         }
 
+        // Diálogo (não toast): o item já saiu da comanda, e o operador precisa
+        // ver o motivo antes de continuar — um aviso que some sozinho deixaria
+        // o consumo desaparecer sem explicação nenhuma.
+        state.syncRejectionMessage?.let { reason ->
+            SyncRejectionDialog(reason = reason, onDismiss = onDismissSyncRejection)
+        }
+
         if (state.logoutConfirmationOpen) {
             LogoutConfirmationDialog(
                 onConfirm = onConfirmLogoutOffline,
@@ -314,6 +323,27 @@ private fun CashWarningDialog(onDismiss: () -> Unit) {
         },
         title = { Text("Caixa fechado") },
         text = { Text(CASH_CLOSED_MESSAGE) },
+    )
+}
+
+/**
+ * Uma operação lançada offline foi RECUSADA pelo servidor ao sincronizar
+ * (ex.: item lançado numa comanda cujo caixa fechou nesse meio tempo).
+ *
+ * O item já foi removido da comanda pelo SyncEngine — nunca fica como
+ * fantasma de R$ 0,00 —, mas sumir sem explicação seria pior que o próprio
+ * fantasma: o operador precisa saber que aquele consumo não existe mais, e
+ * por quê, para poder refazer ou avisar o cliente.
+ */
+@Composable
+private fun SyncRejectionDialog(reason: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Entendi") }
+        },
+        title = { Text("Lançamento não aceito") },
+        text = { Text("$reason\n\nO item foi removido da comanda. Se ainda for necessário, lance de novo.") },
     )
 }
 

@@ -11,6 +11,7 @@ import com.nokta.pos.payment.cielo.CieloDeepLinkPaymentProvider
 import com.nokta.pos.payment.cielo.PendingCieloAttempt
 import com.nokta.pos.sync.ConnectivityMonitor
 import com.nokta.pos.sync.SyncEngine
+import com.nokta.pos.sync.SyncEvent
 import com.nokta.pos.sync.SyncStatusStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,6 +95,14 @@ data class HomeUiState(
      * na hora, então o logout acontece direto, sem fricção.
      */
     val logoutConfirmationOpen: Boolean = false,
+    /**
+     * Operação que o servidor RECUSOU ao sincronizar (ver
+     * SyncEngine.OperationRejected) — ex.: item lançado offline numa comanda
+     * cujo caixa fechou nesse meio tempo. O item some da comanda (nunca vira
+     * fantasma), mas o operador precisa saber POR QUÊ: sem isto, um item
+     * simplesmente desaparecia da tela sem explicação nenhuma.
+     */
+    val syncRejectionMessage: String? = null,
 ) {
     /** Existe algo para o sino badge mostrar. */
     val hasCashWarning: Boolean get() = isCashOpen == false
@@ -166,6 +175,18 @@ class HomeViewModel @Inject constructor(
                 val wasOffline = !_state.value.isOnline
                 _state.value = _state.value.copy(isOnline = online)
                 if (online && wasOffline) syncPending()
+            }
+        }
+
+        // Recusa definitiva do servidor durante a sincronização: o item já foi
+        // removido da comanda (SyncEngine), mas o operador só descobriria pelo
+        // sumiço se não avisássemos aqui — a Home é a tela que ele sempre
+        // alcança depois de uma sincronização em background.
+        viewModelScope.launch {
+            syncEngine.events.collect { event ->
+                if (event is SyncEvent.OperationRejected) {
+                    _state.value = _state.value.copy(syncRejectionMessage = event.reason)
+                }
             }
         }
 
@@ -308,6 +329,11 @@ class HomeViewModel @Inject constructor(
             cieloProvider.discardPendingAttempt()
             _state.value = _state.value.copy(pendingPaymentAttempt = null)
         }
+    }
+
+    /** Aviso de operação recusada na sincronização dispensado pelo operador. */
+    fun dismissSyncRejection() {
+        _state.value = _state.value.copy(syncRejectionMessage = null)
     }
 
     /** Toast de caixa fechado dispensado (pelo X ou pelo tempo) — não reaparece sozinho. */
