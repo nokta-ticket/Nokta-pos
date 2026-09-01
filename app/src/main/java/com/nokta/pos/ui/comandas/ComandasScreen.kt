@@ -386,13 +386,29 @@ private fun OpenTabRow(tab: Tab, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            tab.customerName?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(2.dp))
-                Text(text = it, fontSize = 12.5.sp, color = NoktaMutedSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            // Mesma linha de apoio das outras listas de atendimento (Mesas,
+            // Abertas): cliente quando existe + quantidade de itens. Sem
+            // ela, esta lista era a única que não dizia se a comanda já tem
+            // consumo lançado.
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = buildString {
+                    tab.customerName?.takeIf { it.isNotBlank() }?.let { append(it).append(" · ") }
+                    val count = tab.activeItems.sumOf { it.quantity }
+                    append(if (count == 1) "1 item" else "$count itens")
+                },
+                fontSize = 12.5.sp,
+                color = NoktaMutedSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         Text(
-            text = tab.total.formatBRL(),
+            // `remaining`, não `total`: numa lista de comandas EM ATENDIMENTO
+            // o que importa é quanto falta cobrar (mesmo critério de Mesas e
+            // Abertas). Com pagamento parcial, `total` fazia a mesma comanda
+            // aparecer com valores diferentes dependendo da tela.
+            text = tab.remaining.formatBRL(),
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             color = NoktaInk,
