@@ -206,6 +206,8 @@ data class Tab(
     val syncState: LocalSyncState = LocalSyncState.SYNCED,
     /** Comanda aberta pelo fluxo "Cartão físico" — ver TabEntity.isPhysicalCard. */
     val isPhysicalCard: Boolean = false,
+    /** Contagem de itens vinda do endpoint de lista — ver [activeItemCount]. */
+    val activeItemCountFromServer: Int = 0,
 ) {
     val id: Long get() = serverId ?: negativeLocalId
 
@@ -222,6 +224,18 @@ data class Tab(
 
     /** Itens que contam para o consumo — cancelado continua visível no histórico, mas não aqui. */
     val activeItems get() = items.filterNot { it.status.isCanceled }
+
+    /**
+     * Quantidade de itens para exibir em LISTAS ("N itens").
+     *
+     * As listas vêm de um endpoint que não carrega os itens (por eficiência),
+     * então [activeItems] fica vazia ali e a contagem tem de vir do servidor;
+     * na tela de detalhe, que tem os itens de verdade, eles é que mandam —
+     * inclusive porque refletem cancelamentos feitos offline, que o servidor
+     * ainda não conhece.
+     */
+    val activeItemCount: Int
+        get() = if (items.isEmpty()) activeItemCountFromServer else activeItems.sumOf { it.quantity }
 
     /** "12%" a partir dos basis points — só exibição, nunca usado para recalcular o valor cobrado. */
     val serviceChargeRateLabel: String? get() = serviceChargeRateBps.takeIf { it > 0 }?.let { "${it / 100}%" }

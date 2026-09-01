@@ -69,6 +69,13 @@ data class TabEntity(
      * na aba Cartão físico.
      */
     val isPhysicalCard: Boolean = false,
+    /**
+     * Quantidade de itens ativos vinda do endpoint de LISTA (que não devolve
+     * os itens em si, por eficiência) — ver TabResponse.activeItemCount.
+     * Só é usada quando esta linha não tem os itens carregados localmente;
+     * ver Tab.activeItemCount no domínio.
+     */
+    val activeItemCountFromServer: Int = 0,
 )
 
 @Entity(

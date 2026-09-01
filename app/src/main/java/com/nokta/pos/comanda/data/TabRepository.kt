@@ -691,6 +691,7 @@ private fun TabResponse.toEntity(): TabEntity = TabEntity(
     openedAt = openedAt, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = System.currentTimeMillis(),
     createdAtEpochMs = System.currentTimeMillis(),
     isPhysicalCard = physicalCard != null,
+    activeItemCountFromServer = activeItemCount,
 )
 
 private fun TableResponse.toEntity(organizationId: Long, locationId: Long): VenueTableEntity = VenueTableEntity(
@@ -730,6 +731,7 @@ private fun TabEntity.toDomain(items: List<TabItem>, payments: List<TabPayment>)
         openedAt = openedAt, items = items, payments = payments,
         syncState = when (syncState) { SyncState.SYNCED -> LocalSyncState.SYNCED; SyncState.PENDING -> LocalSyncState.PENDING; SyncState.FAILED -> LocalSyncState.FAILED },
         isPhysicalCard = isPhysicalCard,
+        activeItemCountFromServer = activeItemCountFromServer,
     )
 }
 

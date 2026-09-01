@@ -394,7 +394,7 @@ private fun OpenTabRow(tab: Tab, onClick: () -> Unit) {
             Text(
                 text = buildString {
                     tab.customerName?.takeIf { it.isNotBlank() }?.let { append(it).append(" · ") }
-                    val count = tab.activeItems.sumOf { it.quantity }
+                    val count = tab.activeItemCount
                     append(if (count == 1) "1 item" else "$count itens")
                 },
                 fontSize = 12.5.sp,

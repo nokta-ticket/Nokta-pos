@@ -80,6 +80,14 @@ data class TabResponse(
      * avulsa aberta por outro meio.
      */
     val physicalCard: TabPhysicalCardRef? = null,
+    /**
+     * Soma das quantidades dos itens não cancelados, já calculada pelo
+     * backend. Só vem no endpoint de LISTA (`listTabs`), que por eficiência
+     * não devolve orders/items — sem isto as listas do POS não teriam como
+     * mostrar "N itens" (contavam sempre 0). No detalhe da comanda
+     * (`getTab`), que traz os itens completos, a contagem sai deles.
+     */
+    val activeItemCount: Int = 0,
 )
 
 @Serializable

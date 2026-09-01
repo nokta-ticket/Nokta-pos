@@ -118,7 +118,7 @@ private fun HistoricoRow(tab: Tab, onClick: () -> Unit) {
                             TabType.WRISTBAND -> "Pulseira"
                         },
                     )
-                    val count = tab.activeItems.sumOf { it.quantity }
+                    val count = tab.activeItemCount
                     if (count > 0) append(" · $count ${if (count == 1) "item" else "itens"}")
                 },
                 fontSize = 12.5.sp,

@@ -385,7 +385,7 @@ private fun OpenTableCard(tab: Tab, onClick: () -> Unit) {
             Spacer(Modifier.height(3.dp))
             Text(
                 text = buildString {
-                    val count = tab.activeItems.size
+                    val count = tab.activeItemCount
                     append(if (count == 1) "1 item" else "$count itens")
                     openedAtLabel?.let { append("  •  Aberta às "); append(it) }
                 },

@@ -63,7 +63,7 @@ class EnumConverters {
         VenueTableEntity::class,
         OutboxEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)

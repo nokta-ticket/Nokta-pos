@@ -342,7 +342,7 @@ private fun ComandaCard(tab: Tab, onClick: () -> Unit) {
             Instant.parse(it).atZone(ZoneId.systemDefault()).format(openedAtFormatter)
         }.getOrNull()
     }
-    val itemCount = tab.activeItems.sumOf { it.quantity }
+    val itemCount = tab.activeItemCount
 
     Row(
         modifier = Modifier
