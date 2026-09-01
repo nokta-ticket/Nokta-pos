@@ -158,11 +158,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
 
         // Fluxo simplificado por pulseira/cartão físico (ver ComandasViewModel):
         // o garçom digita só o número + tipo, o backend decide o resultado —
-        // abre direto ou pede vinculação de cliente. Substitui o antigo
-        // OpenComandaScreen (mesa/comanda genérica, mantido em ui/orders sem
-        // nenhuma tela apontando pra ele). A lista antiga de comandas
-        // (Abertas/Encerradas, ComandasScreen em ui/comanda) saiu da
-        // navegação por ora — não confundir os dois pacotes "comanda"/"comandas".
+        // abre direto ou pede vinculação de cliente.
         composable(Routes.BUSCAR_COMANDA) {
             ComandasScreen(
                 // Sem popUpTo: a tela de Comandas continua na pilha, então

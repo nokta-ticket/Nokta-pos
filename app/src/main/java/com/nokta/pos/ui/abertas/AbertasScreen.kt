@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabStatus
 import com.nokta.pos.comanda.domain.TabType
+import com.nokta.pos.ui.comandas.WristbandIcon
 import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.theme.NoktaInk
@@ -219,10 +220,15 @@ private fun OpenTabCard(tab: Tab, onClick: () -> Unit) {
     val openedAtLabel = tab.openedAt?.let {
         runCatching { openedAtFormat.format(java.util.Date.from(java.time.Instant.parse(it))) }.getOrNull()
     }
-    val icon = when (tab.type) {
-        TabType.TABLE -> Icons.Outlined.TableRestaurant
-        TabType.WRISTBAND -> Icons.Outlined.CreditCard
-        TabType.INDIVIDUAL, TabType.COUNTER -> Icons.Outlined.Description
+    // Esta é a única lista que mistura os três tipos, então o ícone é o que
+    // diferencia cada linha à primeira vista. Antes, pulseira usava o ícone
+    // de cartão e cartão físico usava o de comanda comum — os três ficavam
+    // ambíguos justamente onde a distinção importa.
+    val icon = when {
+        tab.type == TabType.TABLE -> Icons.Outlined.TableRestaurant
+        tab.type == TabType.WRISTBAND -> WristbandIcon
+        tab.isPhysicalCard -> Icons.Outlined.CreditCard
+        else -> Icons.Outlined.Description
     }
 
     Row(
