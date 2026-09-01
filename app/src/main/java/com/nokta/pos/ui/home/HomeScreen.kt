@@ -44,6 +44,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.BuildConfig
 import com.nokta.pos.common.Money
 import com.nokta.pos.ui.components.NoktaFooter
+import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosInlineWarning
 import com.nokta.pos.ui.theme.*
 
@@ -72,6 +73,12 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Mesmo bug já corrigido em Comandas/Abertas/Mesas: a Home fica na
+    // pilha de navegação, e o badge "Abertas" (openTabsCount) só refletia
+    // dado fresco depois de visitar outra tela que sincronizasse o Room —
+    // nunca a própria Home. Ver HomeViewModel.refreshOpenTabs.
+    OnResumeEffect(viewModel::refreshOpenTabs)
 
     state.pendingPaymentAttempt?.let { attempt ->
         PendingPaymentDialog(

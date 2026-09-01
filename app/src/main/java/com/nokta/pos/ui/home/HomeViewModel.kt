@@ -171,6 +171,7 @@ class HomeViewModel @Inject constructor(
 
         syncPending()
         loadOpenTabsCount()
+        refreshOpenTabs()
         loadCashStatus()
         warmUpMenuCache()
     }
@@ -219,6 +220,14 @@ class HomeViewModel @Inject constructor(
      * Quantas mesas/comandas seguem abertas — observa o Room continuamente
      * (nunca uma leitura única): reflete tanto o que veio do servidor quanto
      * comandas abertas offline neste terminal, sem precisar de rede.
+     *
+     * Só isso NÃO basta pra ficar correto: o Room só é alimentado por uma
+     * busca de rede real (searchOpenTabs), e a Home nunca disparava a sua
+     * própria — o número ficava desatualizado até o operador visitar
+     * Comandas/Mesas/Abertas (que chamam searchOpenTabs) e voltar. Por isso
+     * [refreshOpenTabs] existe: dispara essa busca sempre que a Home volta a
+     * ficar visível (ver HomeScreen, OnResumeEffect), mantendo o Flow aqui
+     * como está, só garantindo que ele tem dado fresco pra refletir.
      */
     fun loadOpenTabsCount() {
         val organizationId = authRepository.currentOrganizationId() ?: return
@@ -228,6 +237,13 @@ class HomeViewModel @Inject constructor(
                 _state.value = _state.value.copy(openTabsCount = count)
             }
         }
+    }
+
+    /** Ver comentário de [loadOpenTabsCount] — busca de rede que mantém o Room (e portanto o contador) em dia. */
+    fun refreshOpenTabs() {
+        val organizationId = authRepository.currentOrganizationId() ?: return
+        val locationId = authRepository.currentLocationId() ?: return
+        viewModelScope.launch { tabRepository.searchOpenTabs(organizationId, locationId) }
     }
 
     /**
