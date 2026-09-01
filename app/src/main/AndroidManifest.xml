@@ -6,7 +6,6 @@
     <!-- Indicador de conexão da Home (ConnectivityMonitor). Sem esta
          permissão o sistema devolve "sem rede" sempre. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 

@@ -62,9 +62,10 @@ private val tabIdArg = navArgument("tabId") { type = NavType.StringType }
  *    derrubar o pareamento do terminal — quem observa isso é o
  *    `SessionEvents`, alimentado pelo interceptor de rede.
  *
- * A rota de scanner de QR foi removida da navegação: um garçom com maquininha
- * digita "mesa 12" ou "comanda 123", não escaneia (item 3 do brief). Os
- * arquivos do scanner continuam no projeto, sem tela apontando para eles.
+ * Não existe scanner de QR: um garçom com maquininha digita "mesa 12" ou
+ * "comanda 123", não escaneia (item 3 do brief). O pacote ui/scanner e as
+ * dependências de câmera/ML Kit foram removidos por isso — se um dia o
+ * scanner voltar, é código novo, não um arquivo esquecido para reativar.
  */
 @Composable
 fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEvents, deviceEvents: DeviceEvents) {
