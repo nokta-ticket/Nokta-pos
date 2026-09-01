@@ -71,6 +71,13 @@ fun MesasScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // Esta tela fica na pilha de navegação enquanto o garçom abre uma
+    // comanda e volta — sem recarregar em ON_RESUME, "Mesas em atendimento"
+    // mostrava total/itens desatualizados até sair pra Home e reentrar.
+    // Só em CENTRAL (onde a lista aparece) — Abrir/Consultar tem sua própria
+    // resolução local contra o snapshot já carregado.
+    OnResumeEffect { if (state.mode == MesasMode.CENTRAL) viewModel.searchOpenTabs() }
+
     // Dentro de Abrir/Consultar, o botão físico de voltar retorna à central
     // (nunca sai da tela de Mesas direto) — mesmo padrão de NovaVendaScreen.
     BackHandler(enabled = state.mode != MesasMode.CENTRAL) {

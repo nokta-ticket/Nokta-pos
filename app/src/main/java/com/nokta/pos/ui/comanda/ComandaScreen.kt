@@ -51,11 +51,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -119,6 +122,12 @@ fun ComandaScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
+    // Altura real da barra de ações inferior (varia: 1 ou 2 linhas de
+    // botões dependendo do estado da comanda) — o Snackbar usa isso como
+    // respiro extra pra nunca sobrepor os botões, em vez de um padding fixo
+    // que só funcionava por acaso em alguns estados.
+    var bottomActionsHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
 
     LaunchedEffect(state.closed) { if (state.closed) onBack() }
 
@@ -151,12 +160,15 @@ fun ComandaScreen(
                 onRequestClose = { viewModel.requestClose(onClosed = onCheckout) },
                 onCancelClose = viewModel::cancelClose,
                 onBack = onBack,
+                onBottomActionsHeightChanged = { bottomActionsHeight = with(density) { it.toDp() } },
             )
         }
 
         state.actionMessage?.let {
             Snackbar(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = bottomActionsHeight + 12.dp, top = 16.dp),
                 action = { TextButton(onClick = viewModel::clearActionMessage) { Text("Ok") } },
             ) { Text(it) }
         }
@@ -189,6 +201,7 @@ private fun ComandaContent(
     onRequestClose: () -> Unit,
     onCancelClose: () -> Unit,
     onBack: () -> Unit,
+    onBottomActionsHeightChanged: (Int) -> Unit,
 ) {
     val filteredItems = if (query.isBlank()) {
         tab.items
@@ -272,6 +285,7 @@ private fun ComandaContent(
             onCloseTab = onCloseTab,
             onRequestClose = onRequestClose,
             onCancelClose = onCancelClose,
+            modifier = Modifier.onGloballyPositioned { onBottomActionsHeightChanged(it.size.height) },
         )
     }
 }
@@ -562,6 +576,7 @@ private fun BottomActions(
     onCloseTab: () -> Unit,
     onRequestClose: () -> Unit,
     onCancelClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // Mesa (TabType.TABLE) só cobra depois de "fechar a conta" — o consumo
     // acontece o atendimento inteiro e o pagamento é sempre o passo final,
@@ -572,7 +587,7 @@ private fun BottomActions(
     val hidePayWhileOpen = tab.type == TabType.TABLE && tab.isEditable && !tab.isFullyPaid
     val showPayButton = canTakePayments && !hidePayWhileOpen
 
-    Column(Modifier.fillMaxWidth().background(NoktaSurface).padding(horizontal = Dim.ScreenPad)) {
+    Column(modifier.fillMaxWidth().background(NoktaSurface).padding(horizontal = Dim.ScreenPad)) {
         if (tab.status == TabStatus.CLOSING) {
             SecondaryActionRow(text = "CANCELAR FECHAMENTO", onClick = onCancelClose)
             Spacer(Modifier.height(10.dp))

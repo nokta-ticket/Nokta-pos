@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabStatus
 import com.nokta.pos.comanda.domain.TabType
+import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.theme.NoktaInk
 import com.nokta.pos.ui.theme.NoktaMuted
@@ -81,6 +82,12 @@ fun AbertasScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
+
+    // Esta tela fica na pilha de navegação enquanto o garçom abre uma
+    // comanda e volta — sem recarregar em ON_RESUME, a lista mostrava
+    // total/itens desatualizados até sair pra Home e reentrar.
+    OnResumeEffect(viewModel::load)
+
     val filtered = if (query.isBlank()) {
         state.tabs
     } else {

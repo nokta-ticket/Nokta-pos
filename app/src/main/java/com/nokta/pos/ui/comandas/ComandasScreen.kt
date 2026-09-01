@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nokta.pos.comanda.domain.Tab
+import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosInlineWarning
 import com.nokta.pos.ui.components.PosPrimaryButton
 import com.nokta.pos.ui.theme.NoktaInk
@@ -90,17 +91,8 @@ fun ComandasScreen(
     // Esta tela fica na pilha de navegação (nunca é recriada) enquanto o
     // garçom abre uma comanda e volta — sem isso, "Em atendimento" mostrava
     // o total antigo até sair e reentrar (o ViewModel só carrega uma vez no
-    // init/troca de aba). ON_RESUME recarrega toda vez que a tela volta a
-    // ficar visível, inclusive ao voltar de dentro de uma comanda que acabou
-    // de receber um item novo.
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.loadOpenTabs()
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    // init/troca de aba). Ver OnResumeEffect.
+    OnResumeEffect(viewModel::loadOpenTabs)
 
     Column(
         Modifier
