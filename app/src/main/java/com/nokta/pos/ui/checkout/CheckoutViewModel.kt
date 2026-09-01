@@ -253,28 +253,17 @@ class CheckoutViewModel @Inject constructor(
 
         viewModelScope.launch {
             when (_state.value.selectedMethod) {
-                PaymentUiMethod.CASH -> {
-                    // Só DINHEIRO depende de caixa aberto (é o que alimenta a
-                    // conferência da gaveta) — cartão/PIX vão direto para a
-                    // adquirente e nunca são bloqueados por isso. Checar aqui,
-                    // ANTES de receber o dinheiro do cliente, evita o operador
-                    // descobrir a recusa com a nota já na mão. `null` (sem
-                    // rede para consultar) não bloqueia: o backend continua
-                    // sendo a autoridade, e travar por incerteza custaria a
-                    // venda justamente quando o app está offline.
-                    if (authRepository.requiresOpenCashSessionForPayments() &&
-                        tabRepository.isCashOpen(organizationId, tab.locationId) == false
-                    ) {
-                        fail("Abra o caixa antes de receber em dinheiro. Cartão e PIX seguem liberados.")
-                        return@launch
-                    }
-                    register(
-                        organizationId, tab, "CASH", amount,
-                        receivedCents = _state.value.receivedCents,
-                        externalReference = null,
-                        attemptId = UUID.randomUUID().toString(),
-                    )
-                }
+                // Nenhuma checagem de caixa aqui, em nenhum método: fechar o
+                // caixa impede LANÇAR ITEM NOVO, nunca receber uma comanda que
+                // já estava aberta (o backend recusa o lançamento, nunca o
+                // pagamento). O pagamento é conciliado no caixa em que o
+                // atendimento nasceu, mesmo que esse caixa já tenha fechado.
+                PaymentUiMethod.CASH -> register(
+                    organizationId, tab, "CASH", amount,
+                    receivedCents = _state.value.receivedCents,
+                    externalReference = null,
+                    attemptId = UUID.randomUUID().toString(),
+                )
                 // PIX passa pelo mesmo deep link da Cielo Smart que
                 // débito/crédito — é o PIX cobrado dentro do terminal (QR
                 // gerado pela própria Cielo), com confirmação real da
@@ -322,23 +311,12 @@ class CheckoutViewModel @Inject constructor(
     }
 
     /**
-     * Traduz a recusa do backend por caixa fechado.
-     *
-     * `requireOpenCashSessionForPayments` (ligado por padrão) faz o servidor
-     * recusar pagamento EM DINHEIRO sem caixa aberto — é o dinheiro que
-     * alimenta a conferência da gaveta; cartão e PIX nunca são bloqueados
-     * por isso. A mensagem crua não diz ao garçom o que fazer, e ele não abre
-     * caixa pelo POS — é ação de gerente no dashboard.
+     * O backend nunca recusa pagamento por caixa fechado (fechar o caixa
+     * impede lançar item novo, nunca receber uma comanda já aberta), então
+     * não existe mais nada específico de caixa pra traduzir aqui — a
+     * mensagem do servidor já basta.
      */
-    private fun humanizeError(raw: String?): String {
-        val message = raw ?: "Falha ao registrar o pagamento."
-        return if (message.contains("caixa", ignoreCase = true)) {
-            "O caixa desta unidade está fechado, e o sistema exige caixa aberto para receber em dinheiro. " +
-                "Cobre em cartão ou PIX, ou peça ao gerente para abrir o caixa no painel (Operação › Caixa)."
-        } else {
-            message
-        }
-    }
+    private fun humanizeError(raw: String?): String = raw ?: "Falha ao registrar o pagamento."
 
     private suspend fun register(
         organizationId: Long,

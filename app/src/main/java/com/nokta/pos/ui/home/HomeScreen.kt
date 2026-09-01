@@ -107,13 +107,13 @@ fun HomeScreen(
 
 /**
  * Texto do aviso de caixa fechado — mesmo texto no toast e no dialog reaberto
- * pelo sino. Só o DINHEIRO depende do caixa (é ele que alimenta a conferência
- * da gaveta); cartão e PIX vão direto para a adquirente e continuam
- * funcionando normalmente, então o aviso nunca deve sugerir que a venda está
- * parada.
+ * pelo sino. Caixa fechado impede LANÇAR ITEM NOVO, nunca receber: as mesas e
+ * comandas que já estão abertas continuam podendo ser pagas normalmente, em
+ * qualquer forma de pagamento. O aviso nunca deve sugerir que o recebimento
+ * está parado.
  */
 private const val CASH_CLOSED_MESSAGE =
-    "Caixa fechado nesta unidade — só o recebimento em dinheiro fica bloqueado até um gerente abrir o caixa no painel (Operação › Caixa). Cartão, PIX e o lançamento de pedidos seguem normalmente."
+    "Caixa fechado nesta unidade — não é possível lançar novos itens até um gerente abrir o caixa no painel (Operação › Caixa). As mesas e comandas já abertas continuam podendo ser pagas normalmente."
 
 /**
  * Conteúdo visual da Home, sem ViewModel.
