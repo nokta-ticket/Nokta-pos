@@ -101,6 +101,7 @@ fun MesasScreen(
             // resultado ("Mesa X" + botão) no instante entre confirmar e a
             // navegação acontecer, que seria uma 2ª confirmação redundante.
             skipResultWhenNotOccupied = true,
+            skipResultWhenOccupied = false,
         )
         MesasMode.CONSULTAR -> NumeroMesaScreen(
             title = "Consultar mesa",
@@ -112,6 +113,12 @@ fun MesasScreen(
             occupiedTitle = null,
             occupiedAction = "Ver consumo",
             skipResultWhenNotOccupied = false,
+            // Digitar o número em Consultar já É a intenção de ver — mesa
+            // ocupada entra direto no consumo (MesasViewModel.confirmQuery
+            // já disparou openExisting sozinho), sem a tela "Mesa X" +
+            // botão "Ver consumo" a mais. Mesa vazia continua pedindo
+            // confirmação antes de virar "Abrir mesa" (mudança de intenção).
+            skipResultWhenOccupied = true,
         )
     }
 }
@@ -464,6 +471,7 @@ private fun NumeroMesaScreen(
     occupiedTitle: String?,
     occupiedAction: String,
     skipResultWhenNotOccupied: Boolean,
+    skipResultWhenOccupied: Boolean,
 ) {
     Scaffold(
         topBar = { PosTopBar(title = title, onBack = viewModel::backToCentral) },
@@ -477,6 +485,13 @@ private fun NumeroMesaScreen(
                     initialValue = state.query,
                     onConfirm = { viewModel.setQuery(it); viewModel.confirmQuery(onOpenTab) },
                 )
+                // CONSULTAR com mesa já ocupada: MesasViewModel.confirmQuery
+                // já disparou openExisting sozinho — mostra só um loading
+                // breve em vez da tela "Mesa X" + botão "Ver consumo", que
+                // seria um clique a mais pra ver o que o garçom já pediu.
+                state.matchingOpenTab != null && skipResultWhenOccupied -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    PosLoading(label = "Abrindo mesa $confirmed…")
+                }
                 state.matchingOpenTab != null -> {
                     val tab = state.matchingOpenTab!!
                     ResultContent(

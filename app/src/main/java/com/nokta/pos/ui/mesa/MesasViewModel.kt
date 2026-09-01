@@ -107,19 +107,28 @@ class MesasViewModel @Inject constructor(
      * Confirma o número digitado — resolve localmente contra as comandas já
      * em atendimento (funciona offline).
      *
-     * Em CONSULTAR, sempre mostra a tela de resultado (o garçom pediu pra
-     * ver, então vê — mesa ocupada ou não). Em ABRIR, digitar o número já É
-     * a intenção de abrir: se não há mesa ocupada com este nome, pula direto
-     * pra [openByName] sem tela intermediária pedindo confirmação de novo.
-     * Só cai na tela de resultado em ABRIR quando a mesa JÁ está ocupada —
-     * aí o garçom precisa saber disso antes de continuar (ver
-     * MesasScreen.ResultContent, occupiedTitle).
+     * Digitar o número já É a intenção de ver o resultado — nunca mostra uma
+     * tela intermediária pedindo confirmação de novo quando dá pra agir
+     * direto:
+     *  - ABRIR sem mesa ocupada: abre direto ([openByName]).
+     *  - CONSULTAR com mesa já ocupada: entra direto no consumo
+     *    ([openExisting]) — "consultar" já é ver, não precisa de um botão
+     *    "Ver consumo" a mais.
+     * Só cai na tela de resultado quando a intenção muda de verdade: ABRIR
+     * numa mesa já ocupada (o garçom precisa saber disso antes de ir pra
+     * "Consultar mesa", ver MesasScreen.ResultContent/occupiedTitle) ou
+     * CONSULTAR uma mesa vazia (pede confirmação antes de virar uma
+     * abertura, que é uma ação diferente da que foi pedida).
      */
     fun confirmQuery(onOpened: (String) -> Unit) {
         val trimmed = _state.value.query.trim()
         _state.value = _state.value.copy(confirmedQuery = trimmed, error = null)
-        if (_state.value.mode == MesasMode.ABRIR && _state.value.matchingOpenTab == null) {
+        val mode = _state.value.mode
+        val matching = _state.value.matchingOpenTab
+        if (mode == MesasMode.ABRIR && matching == null) {
             openByName(trimmed, onOpened)
+        } else if (mode == MesasMode.CONSULTAR && matching != null) {
+            openExisting(matching, onOpened)
         }
     }
 
