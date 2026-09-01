@@ -134,6 +134,28 @@ data class TabItem(
      */
     val canRemoveAsDraft: Boolean get() = serverId == null
 
+    /**
+     * Rótulo do badge da linha. Enquanto o lançamento não foi aceito pelo
+     * servidor, o estado que importa para o operador é o de SINCRONIZAÇÃO, não
+     * o operacional: dizer "Enviado" a um item que ainda está na fila offline é
+     * simplesmente falso, e foi o que a comanda mostrava antes. Assim que o
+     * backend confirma (`serverId` preenchido), o rótulo volta a ser o estado
+     * real do pedido — "Enviado", "Em preparo", "Entregue".
+     *
+     * Cancelado tem precedência: um item cancelado offline já é um fato local
+     * decidido pelo operador, e mostrá-lo como "Pendente" esconderia isso.
+     */
+    val displayStatusLabel: String
+        get() = when {
+            status.isCanceled -> status.label
+            syncState == LocalSyncState.PENDING -> "Pendente"
+            syncState == LocalSyncState.FAILED -> "Falha ao enviar"
+            else -> status.label
+        }
+
+    /** Aguardando confirmação do servidor — ver [displayStatusLabel]. */
+    val isAwaitingSync: Boolean get() = !status.isCanceled && syncState != LocalSyncState.SYNCED
+
     /** Descrição completa da linha, incluindo adicionais e observação. */
     val detailLine: String?
         get() {
@@ -219,6 +241,26 @@ data class Tab(
     /** A mesa ainda está fisicamente ocupada (cliente não foi embora) — usar para decidir o que aparece como "em atendimento", nunca [isOpen] sozinho (que exclui CLOSING/PAYMENT_IN_PROGRESS). */
     val isOccupying get() = status == TabStatus.OPEN || status == TabStatus.CLOSING || status == TabStatus.PAYMENT_IN_PROGRESS
 
+    /**
+     * Consumo ainda não contabilizado pelo servidor: itens lançados offline que
+     * seguem na fila. Os totais oficiais ([subtotal]/[total]/[remaining]) são
+     * SEMPRE os do backend e nunca são recalculados aqui — mas eles ainda
+     * desconhecem estes itens, então somá-los é o que permite ao garçom saber
+     * quanto cobrar sem esperar a rede voltar. Some zero assim que sincroniza
+     * (o item ganha `serverId` e passa a estar dentro do total oficial), então
+     * nunca há contagem dupla.
+     */
+    val pendingConsumption: Money
+        get() = Money.sum(activeItems.filter { it.isAwaitingSync }.map { it.lineTotal })
+
+    /** Total incluindo o consumo pendente — o que o cliente deve de fato agora. */
+    val totalWithPending: Money get() = total + pendingConsumption
+
+    /** Saldo a cobrar incluindo o consumo pendente. */
+    val remainingWithPending: Money get() = remaining + pendingConsumption
+
+    val hasPendingConsumption: Boolean get() = pendingConsumption.isPositive()
+
     val isFullyPaid get() = remaining.isZeroOrNegative()
     val hasPartialPayment get() = paid.isPositive() && !isFullyPaid
 
@@ -254,14 +296,38 @@ data class Tab(
         }
 }
 
-data class OrderLineModifier(val modifierGroupId: Long, val modifierOptionId: Long, val quantity: Int = 1)
+data class OrderLineModifier(
+    val modifierGroupId: Long,
+    val modifierOptionId: Long,
+    val quantity: Int = 1,
+    /** Só para exibir o rascunho local antes da confirmação — ver [OrderLine]. */
+    val name: String = "",
+    val priceCents: Long = 0,
+)
 
+/**
+ * Uma linha a lançar. Os campos que o backend precisa são apenas os ids
+ * ([menuItemId]/[variantId]), a quantidade e os adicionais — é isso que vai no
+ * request e é sobre isso que o servidor decide preço, disponibilidade e caixa.
+ *
+ * [productName]/[variantName]/[unitPriceCents] existem por um motivo
+ * diferente e estritamente local: enquanto o lançamento está na fila offline,
+ * a comanda precisa mostrar "Budweiser 269ml · 1 × R$ 8,00" em vez de uma
+ * linha sem nome de R$ 0,00. São um SNAPSHOT do cardápio que o terminal já
+ * tinha em mãos no momento do toque, nunca uma segunda fonte de verdade: na
+ * sincronização o backend revalida tudo e sua resposta sobrescreve estes
+ * valores (ver `writeTabFromServer`). Um preço adulterado aqui mudaria só o
+ * que este terminal exibe por alguns segundos, jamais o que é cobrado.
+ */
 data class OrderLine(
     val menuItemId: Long,
     val variantId: Long,
     val quantity: Int,
     val notes: String? = null,
     val modifiers: List<OrderLineModifier> = emptyList(),
+    val productName: String = "",
+    val variantName: String = "",
+    val unitPriceCents: Long = 0,
 )
 
 /** Mesa do salão, com a comanda aberta embutida quando ocupada. */

@@ -375,8 +375,15 @@ class TabRepository @Inject constructor(
         if (tabDao.getOrderByLocalId(orderLocalId) != null) return // já lançado nesta tentativa — retry idempotente
         val now = System.currentTimeMillis()
         tabDao.upsertOrder(TabOrderEntity(localId = orderLocalId, serverId = null, tabLocalId = tabLocalId, status = "SENT", syncState = SyncState.PENDING, createdAtEpochMs = now))
+        // Nome/preço vêm do snapshot que o caller já tinha (cardápio local ou
+        // a própria linha sendo relançada) — ver OrderLine. Antes eram gravados
+        // vazios/zerados, e a comanda offline exibia linhas sem nome de
+        // R$ 0,00: o garçom não conseguia conferir o consumo nem saber quanto
+        // cobrar enquanto a fila não drenava. Continua sendo só exibição: a
+        // resposta do servidor sobrescreve tudo isto na sincronização.
         tabDao.upsertItems(
             lines.map { line ->
+                val modifiersTotalCents = line.modifiers.sumOf { it.priceCents * it.quantity }
                 TabItemEntity(
                     localId = UUID.randomUUID().toString(),
                     serverId = null,
@@ -384,15 +391,21 @@ class TabRepository @Inject constructor(
                     orderLocalId = orderLocalId,
                     menuItemId = line.menuItemId,
                     variantId = line.variantId,
-                    productName = "",
-                    variantName = "",
+                    productName = line.productName,
+                    variantName = line.variantName,
                     quantity = line.quantity,
-                    unitPriceCents = 0,
-                    modifiersTotalCents = 0,
-                    lineTotalCents = 0,
+                    unitPriceCents = line.unitPriceCents,
+                    modifiersTotalCents = modifiersTotalCents,
+                    lineTotalCents = (line.unitPriceCents + modifiersTotalCents) * line.quantity,
+                    // Status OPERACIONAL previsto (o servidor confirmará o
+                    // mesmo). Que o lançamento ainda não foi aceito é dito por
+                    // `serverId == null` -> LocalSyncState.PENDING, que é o que
+                    // a comanda exibe como "Pendente" — nunca por este campo.
                     status = "SENT",
                     notes = line.notes,
-                    modifiersJson = json.encodeToString(line.modifiers.map { PersistedModifier(name = "", quantity = it.quantity, totalCents = 0) }),
+                    modifiersJson = json.encodeToString(
+                        line.modifiers.map { PersistedModifier(name = it.name, quantity = it.quantity, totalCents = it.priceCents * it.quantity) },
+                    ),
                     createdAtEpochMs = now,
                 )
             },
@@ -523,7 +536,14 @@ class TabRepository @Inject constructor(
         submitOrder(
             organizationId = organizationId,
             tabLocalId = tabLocalId,
-            lines = listOf(OrderLine(menuItemId = item.menuItemId, variantId = item.variantId, quantity = 1, notes = item.notes)),
+            // Relança a MESMA linha: reaproveita nome/preço já conhecidos para
+            // a unidade extra não aparecer como item sem nome enquanto pendente.
+            lines = listOf(
+                OrderLine(
+                    menuItemId = item.menuItemId, variantId = item.variantId, quantity = 1, notes = item.notes,
+                    productName = item.productName, variantName = item.variantName, unitPriceCents = item.unitPrice.cents,
+                ),
+            ),
         )
     }
 
@@ -548,7 +568,12 @@ class TabRepository @Inject constructor(
             submitOrder(
                 organizationId = organizationId,
                 tabLocalId = entity.tabLocalId,
-                lines = listOf(OrderLine(menuItemId = item.menuItemId, variantId = item.variantId, quantity = remaining, notes = item.notes)),
+                lines = listOf(
+                    OrderLine(
+                        menuItemId = item.menuItemId, variantId = item.variantId, quantity = remaining, notes = item.notes,
+                        productName = item.productName, variantName = item.variantName, unitPriceCents = item.unitPrice.cents,
+                    ),
+                ),
             )
         }
         return outcome

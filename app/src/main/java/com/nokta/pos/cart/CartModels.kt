@@ -32,12 +32,24 @@ data class CartLine(
     val modifiersTotal: Money get() = Money(modifiers.sumOf { it.priceCents })
     val lineTotal: Money get() = (unitPrice + modifiersTotal) * quantity
 
+    /**
+     * Nome/preço vão junto de propósito: o carrinho já os tem (vieram do
+     * cardápio ao montar a linha) e é o rascunho local da comanda que precisa
+     * deles para se exibir corretamente enquanto o lançamento aguarda
+     * sincronização. Ver [OrderLine] — nada disso é enviado ao backend nem
+     * influencia o que ele cobra.
+     */
     fun toOrderLine(): OrderLine = OrderLine(
         menuItemId = menuItemId,
         variantId = variantId,
         quantity = quantity,
         notes = notes,
-        modifiers = modifiers.map { OrderLineModifier(it.modifierGroupId, it.modifierOptionId) },
+        modifiers = modifiers.map {
+            OrderLineModifier(it.modifierGroupId, it.modifierOptionId, name = it.name, priceCents = it.priceCents)
+        },
+        productName = productName,
+        variantName = variantName,
+        unitPriceCents = unitPrice.cents,
     )
 }
 

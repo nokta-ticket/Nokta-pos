@@ -78,6 +78,7 @@ import com.nokta.pos.ui.theme.NoktaMutedSoft
 import com.nokta.pos.ui.theme.NoktaPurple
 import com.nokta.pos.ui.theme.NoktaPurpleBright
 import com.nokta.pos.ui.theme.NoktaSurface
+import com.nokta.pos.ui.theme.WarningAmber
 
 /* =========================================================================
  *  AJUSTES RÁPIDOS — mexa só aqui para calibrar a tela
@@ -343,7 +344,10 @@ private fun BalanceCard(tab: Tab) {
                 // inteiro e só é cobrado no fim; mostrar "Quitada" com
                 // remaining=0 assim que a mesa abre (sem nenhum pagamento
                 // ainda) sugeria erroneamente que algo já tinha sido pago.
-                text = if (tab.isFullyPaid && tab.paid.isPositive()) "QUITADA" else "TOTAL DE CONSUMO",
+                // Com consumo pendente nunca é "QUITADA": o saldo oficial pode
+                // estar zerado só porque o servidor ainda não conhece o item
+                // lançado offline.
+                text = if (tab.isFullyPaid && tab.paid.isPositive() && !tab.hasPendingConsumption) "QUITADA" else "TOTAL DE CONSUMO",
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.6.sp,
@@ -351,16 +355,21 @@ private fun BalanceCard(tab: Tab) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = tab.remaining.formatBRL(),
+                // Inclui o consumo ainda em fila — é este o valor a cobrar do
+                // cliente agora, mesmo sem rede. Ver Tab.remainingWithPending.
+                text = tab.remainingWithPending.formatBRL(),
                 fontSize = 38.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-1.2).sp,
-                color = if (tab.isFullyPaid && tab.paid.isPositive()) MoneyGreen else NoktaInk,
+                color = if (tab.isFullyPaid && tab.paid.isPositive() && !tab.hasPendingConsumption) MoneyGreen else NoktaInk,
             )
 
             Spacer(Modifier.height(10.dp))
 
-            MoneyLine("Total", tab.total.formatBRL())
+            MoneyLine("Total", tab.totalWithPending.formatBRL())
+            if (tab.hasPendingConsumption) {
+                MoneyLine("Aguardando sincronização", tab.pendingConsumption.formatBRL(), color = WarningAmber)
+            }
             if (tab.discount.isPositive()) MoneyLine("Desconto", tab.discount.formatBRL())
             if (tab.serviceCharge.isPositive()) MoneyLine("Serviço", tab.serviceCharge.formatBRL())
             if (tab.paid.isPositive()) MoneyLine("Pago", tab.paid.formatBRL(), color = MoneyGreen)
@@ -481,10 +490,14 @@ private fun ItemRow(item: TabItem, canCancel: Boolean, onCancel: () -> Unit) {
                 Text(it, fontSize = 12.sp, color = NoktaMutedSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(4.dp))
+            // Rótulo e tom vêm de displayStatusLabel/isAwaitingSync, não de
+            // status.label direto: um item ainda na fila offline aparece como
+            // "Pendente" (âmbar), nunca como "Enviado".
             PosBadge(
-                item.status.label,
+                item.displayStatusLabel,
                 when {
                     canceled -> PosBadgeTone.DANGER
+                    item.isAwaitingSync -> PosBadgeTone.WARNING
                     item.status.isDelivered -> PosBadgeTone.SUCCESS
                     else -> PosBadgeTone.NEUTRAL
                 },
@@ -649,6 +662,12 @@ private fun BottomActions(
                         enabled = !isClosing,
                         onClick = onCloseTab,
                     )
+                    // Valor do botão é sempre o OFICIAL (tab.remaining): é o
+                    // que o checkout consegue de fato cobrar, porque o servidor
+                    // ainda não conhece o consumo pendente. O rodapé de totais
+                    // mostra o valor real do cliente e sinaliza a diferença —
+                    // prometer aqui um valor que a cobrança não aceita seria
+                    // pior que a defasagem.
                     showPayButton -> PrimaryActionBox(
                         modifier = Modifier.weight(primaryWeight),
                         text = "PAGAR • ${tab.remaining.formatBRL()}",
