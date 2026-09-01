@@ -103,9 +103,24 @@ class MesasViewModel @Inject constructor(
         _state.value = _state.value.copy(query = query)
     }
 
-    /** Confirma o número digitado — resolve localmente contra as comandas já em atendimento (funciona offline); se nenhuma bater, mostra a ação de abrir/consultar sem exigir nenhum cadastro prévio. */
-    fun confirmQuery() {
-        _state.value = _state.value.copy(confirmedQuery = _state.value.query.trim(), error = null)
+    /**
+     * Confirma o número digitado — resolve localmente contra as comandas já
+     * em atendimento (funciona offline).
+     *
+     * Em CONSULTAR, sempre mostra a tela de resultado (o garçom pediu pra
+     * ver, então vê — mesa ocupada ou não). Em ABRIR, digitar o número já É
+     * a intenção de abrir: se não há mesa ocupada com este nome, pula direto
+     * pra [openByName] sem tela intermediária pedindo confirmação de novo.
+     * Só cai na tela de resultado em ABRIR quando a mesa JÁ está ocupada —
+     * aí o garçom precisa saber disso antes de continuar (ver
+     * MesasScreen.ResultContent, occupiedTitle).
+     */
+    fun confirmQuery(onOpened: (String) -> Unit) {
+        val trimmed = _state.value.query.trim()
+        _state.value = _state.value.copy(confirmedQuery = trimmed, error = null)
+        if (_state.value.mode == MesasMode.ABRIR && _state.value.matchingOpenTab == null) {
+            openByName(trimmed, onOpened)
+        }
     }
 
     /**

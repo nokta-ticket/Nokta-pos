@@ -82,12 +82,18 @@ fun MesasScreen(
         MesasMode.ABRIR -> NumeroMesaScreen(
             title = "Abrir mesa",
             question = "Qual é o número da mesa?",
-            confirmText = "Continuar",
+            confirmText = "Abrir mesa",
             state = state,
             viewModel = viewModel,
             onOpenTab = onOpenTab,
             occupiedTitle = "Esta mesa já possui um atendimento aberto.",
             occupiedAction = "Consultar mesa",
+            // Digitar o número em ABRIR já É a intenção de abrir — sem mesa
+            // ocupada, MesasViewModel.confirmQuery já dispara openByName
+            // sozinho (ver comentário lá). Aqui só evita mostrar a tela de
+            // resultado ("Mesa X" + botão) no instante entre confirmar e a
+            // navegação acontecer, que seria uma 2ª confirmação redundante.
+            skipResultWhenNotOccupied = true,
         )
         MesasMode.CONSULTAR -> NumeroMesaScreen(
             title = "Consultar mesa",
@@ -98,6 +104,7 @@ fun MesasScreen(
             onOpenTab = onOpenTab,
             occupiedTitle = null,
             occupiedAction = "Ver consumo",
+            skipResultWhenNotOccupied = false,
         )
     }
 }
@@ -449,6 +456,7 @@ private fun NumeroMesaScreen(
     onOpenTab: (String) -> Unit,
     occupiedTitle: String?,
     occupiedAction: String,
+    skipResultWhenNotOccupied: Boolean,
 ) {
     Scaffold(
         topBar = { PosTopBar(title = title, onBack = viewModel::backToCentral) },
@@ -460,7 +468,7 @@ private fun NumeroMesaScreen(
                     question = question,
                     confirmText = confirmText,
                     initialValue = state.query,
-                    onConfirm = { viewModel.setQuery(it); viewModel.confirmQuery() },
+                    onConfirm = { viewModel.setQuery(it); viewModel.confirmQuery(onOpenTab) },
                 )
                 state.matchingOpenTab != null -> {
                     val tab = state.matchingOpenTab!!
@@ -472,6 +480,12 @@ private fun NumeroMesaScreen(
                         occupiedAction = occupiedAction,
                         onOpen = { viewModel.openExisting(tab, onOpenTab) },
                     )
+                }
+                // Erro em openByName cai aqui também (matchingOpenTab segue
+                // null) — não mostra loading pra sempre, mostra o botão
+                // "Abrir mesa" normal pra permitir retry manual.
+                skipResultWhenNotOccupied && state.error == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    PosLoading(label = "Abrindo mesa $confirmed…")
                 }
                 else -> ResultContent(
                     tableLabel = confirmed,
