@@ -152,6 +152,8 @@ fun ComandaScreen(
                 canTakePayments = state.access.canTakePayments,
                 canCancelItems = state.access.canManageTabs || state.access.canCreateOrders,
                 isClosing = state.isClosing,
+                unresolvedReconciliations = state.unresolvedReconciliations,
+                onResolveReconciliation = viewModel::resolveReconciliation,
                 onCancelItem = viewModel::askCancelItem,
                 onRemoveDraftItem = viewModel::removeDraftItem,
                 onAddProducts = onAddProducts,
@@ -193,6 +195,8 @@ private fun ComandaContent(
     canTakePayments: Boolean,
     canCancelItems: Boolean,
     isClosing: Boolean,
+    unresolvedReconciliations: List<com.nokta.pos.data.local.entity.PaymentReconciliationEntity>,
+    onResolveReconciliation: (com.nokta.pos.data.local.entity.PaymentReconciliationEntity, String) -> Unit,
     onCancelItem: (TabItem) -> Unit,
     onRemoveDraftItem: (TabItem) -> Unit,
     onAddProducts: () -> Unit,
@@ -209,12 +213,26 @@ private fun ComandaContent(
         tab.items.filter { it.productName.contains(query, ignoreCase = true) }
     }
     val activePayments = tab.payments.filterNot { it.isCanceled }
+    var reconciliationBeingResolved by remember { mutableStateOf<com.nokta.pos.data.local.entity.PaymentReconciliationEntity?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar(title = tab.displayName, subtitle = tab.customerName, onBack = onBack)
 
         Column(Modifier.padding(horizontal = Dim.ScreenPad)) {
             BalanceCard(tab)
+
+            // Persistente — não some sozinho, nunca vira um diálogo que passa:
+            // o operador cobrou um valor que incluía um item que o servidor
+            // recusou depois; alguém (gestor/operador) precisa decidir o que
+            // fazer com essa diferença antes de a comanda seguir tratada como
+            // normal. Fica visível toda vez que a tela é aberta até resolver.
+            if (unresolvedReconciliations.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                ReconciliationBanner(
+                    entries = unresolvedReconciliations,
+                    onResolve = { reconciliationBeingResolved = it },
+                )
+            }
 
             when (tab.status) {
                 TabStatus.CLOSING -> {
@@ -288,6 +306,96 @@ private fun ComandaContent(
             modifier = Modifier.onGloballyPositioned { onBottomActionsHeightChanged(it.size.height) },
         )
     }
+
+    reconciliationBeingResolved?.let { entry ->
+        ResolveReconciliationDialog(
+            entry = entry,
+            onConfirm = { note -> onResolveReconciliation(entry, note); reconciliationBeingResolved = null },
+            onDismiss = { reconciliationBeingResolved = null },
+        )
+    }
+}
+
+/* ------------------- Divergência de reconciliação -------------------- */
+
+@Composable
+private fun ReconciliationBanner(
+    entries: List<com.nokta.pos.data.local.entity.PaymentReconciliationEntity>,
+    onResolve: (com.nokta.pos.data.local.entity.PaymentReconciliationEntity) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dim.CardRadius))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(14.dp),
+    ) {
+        Text(
+            if (entries.size == 1) "Divergência de pagamento" else "${entries.size} divergências de pagamento",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Um item já cobrado do cliente foi recusado pelo servidor depois. O valor não foi ajustado sozinho — revise cada caso.",
+            fontSize = 12.5.sp,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Spacer(Modifier.height(10.dp))
+        entries.forEach { entry ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(entry.rejectedItemDescription, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onErrorContainer)
+                    Text(
+                        "${com.nokta.pos.common.Money(entry.rejectedItemAmountCents).formatBRL()} · ${entry.rejectionReason}",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+                TextButton(onClick = { onResolve(entry) }) { Text("Revisar") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResolveReconciliationDialog(
+    entry: com.nokta.pos.data.local.entity.PaymentReconciliationEntity,
+    onConfirm: (note: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var note by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Marcar como revisado") },
+        text = {
+            Column {
+                Text(
+                    "${entry.rejectedItemDescription} — ${com.nokta.pos.common.Money(entry.rejectedItemAmountCents).formatBRL()}\n" +
+                        "Motivo da recusa: ${entry.rejectionReason}\n\n" +
+                        "Registre o que foi decidido (ex.: item cobrado à parte em dinheiro, valor descontado do troco, cliente já foi embora — a decisão é sua, este campo só documenta).",
+                    fontSize = 13.sp,
+                    color = NoktaMuted,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("O que foi feito") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(note) }, enabled = note.isNotBlank()) { Text("Confirmar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
 }
 
 /* ------------------------------ Top bar ----------------------------- */
@@ -346,8 +454,14 @@ private fun BalanceCard(tab: Tab) {
                 // ainda) sugeria erroneamente que algo já tinha sido pago.
                 // Com consumo pendente nunca é "QUITADA": o saldo oficial pode
                 // estar zerado só porque o servidor ainda não conhece o item
-                // lançado offline.
-                text = if (tab.isFullyPaid && tab.paid.isPositive() && !tab.hasPendingConsumption) "QUITADA" else "TOTAL DE CONSUMO",
+                // lançado offline. `isSettledLocally` (cobrou tudo, aguardando
+                // confirmação) tem um rótulo próprio — nem "aberta" nem
+                // "quitada" descreveria certo esse estado intermediário.
+                text = when {
+                    tab.isFullyPaid && tab.paid.isPositive() && !tab.hasPendingConsumption -> "QUITADA"
+                    tab.isSettledLocally -> "AGUARDANDO CONFIRMAÇÃO"
+                    else -> "TOTAL DE CONSUMO"
+                },
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.6.sp,
@@ -373,6 +487,11 @@ private fun BalanceCard(tab: Tab) {
             if (tab.discount.isPositive()) MoneyLine("Desconto", tab.discount.formatBRL())
             if (tab.serviceCharge.isPositive()) MoneyLine("Serviço", tab.serviceCharge.formatBRL())
             if (tab.paid.isPositive()) MoneyLine("Pago", tab.paid.formatBRL(), color = MoneyGreen)
+            if (tab.hasPendingPayment) {
+                // Já foi cobrado do cliente, só falta o servidor confirmar —
+                // distinto de "Pago" (que é só o que o servidor já sabe).
+                MoneyLine("Pagamento aguardando confirmação", tab.pendingPaymentsTotal.formatBRL(), color = WarningAmber)
+            }
 
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

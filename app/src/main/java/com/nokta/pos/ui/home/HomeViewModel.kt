@@ -103,6 +103,15 @@ data class HomeUiState(
      * simplesmente desaparecia da tela sem explicação nenhuma.
      */
     val syncRejectionMessage: String? = null,
+    /**
+     * Um item recusado já tinha sido cobrado num pagamento registrado neste
+     * terminal (ver SyncEngine.PaymentReconciliationRequired) — divergência
+     * financeira real, não só um item que sumiu. Este diálogo só avisa;
+     * quem persiste é PaymentReconciliationEntity, visível na comanda até
+     * alguém revisar (ver ComandaScreen), então fechar este aviso NUNCA
+     * resolve a divergência.
+     */
+    val paymentReconciliationMessage: String? = null,
 ) {
     /** Existe algo para o sino badge mostrar. */
     val hasCashWarning: Boolean get() = isCashOpen == false
@@ -184,8 +193,18 @@ class HomeViewModel @Inject constructor(
         // alcança depois de uma sincronização em background.
         viewModelScope.launch {
             syncEngine.events.collect { event ->
-                if (event is SyncEvent.OperationRejected) {
-                    _state.value = _state.value.copy(syncRejectionMessage = event.reason)
+                when (event) {
+                    is SyncEvent.OperationRejected -> {
+                        _state.value = _state.value.copy(syncRejectionMessage = event.reason)
+                    }
+                    is SyncEvent.PaymentReconciliationRequired -> {
+                        val plural = if (event.count == 1) "um item" else "${event.count} itens"
+                        _state.value = _state.value.copy(
+                            paymentReconciliationMessage = "O servidor recusou $plural que já constava num pagamento cobrado. " +
+                                "Abra a comanda para revisar a diferença — o valor não foi ajustado sozinho.",
+                        )
+                    }
+                    is SyncEvent.OperationSynced -> Unit
                 }
             }
         }
@@ -334,6 +353,14 @@ class HomeViewModel @Inject constructor(
     /** Aviso de operação recusada na sincronização dispensado pelo operador. */
     fun dismissSyncRejection() {
         _state.value = _state.value.copy(syncRejectionMessage = null)
+    }
+
+    /**
+     * Só dispensa ESTE aviso pontual — a divergência em si continua registrada
+     * (PaymentReconciliationEntity) e visível na comanda até ser revisada lá.
+     */
+    fun dismissPaymentReconciliationMessage() {
+        _state.value = _state.value.copy(paymentReconciliationMessage = null)
     }
 
     /** Toast de caixa fechado dispensado (pelo X ou pelo tempo) — não reaparece sozinho. */

@@ -50,10 +50,21 @@ data class CheckoutUiState(
     /** Item aguardando confirmação de remoção (quantidade chegando a 0, ou lixeira). */
     val pendingRemoveItem: TabItem? = null,
 ) {
-    /** Valor que será cobrado nesta operação. */
+    /**
+     * Valor que será cobrado nesta operação — inclui consumo ainda pendente
+     * de sincronização deste terminal (ver `Tab.remainingWithPending`).
+     *
+     * Isso NÃO reabre risco de sobrecobrança entre terminais: a parte
+     * confirmada pelo servidor (`tab.remaining`) continua sendo sempre a
+     * releitura mais recente da API (`refresh()`/`observeTab`), então se
+     * outra maquininha já registrou um pagamento no meio, ela aparece aqui
+     * igual antes. A parte pendente (`pendingConsumption`) só existe no Room
+     * DESTE terminal — nenhum outro terminal a enxerga, então não há como
+     * dois terminais cobrarem em dobro o mesmo pendente.
+     */
     val amountToCharge: Money
         get() {
-            val remaining = tab?.remaining ?: Money.ZERO
+            val remaining = tab?.remainingWithPending ?: Money.ZERO
             return when (amountMode) {
                 AmountMode.FULL -> remaining
                 AmountMode.SPLIT -> SplitCalculator.splitRemaining(remaining, splitPeople).firstOrNull() ?: Money.ZERO
@@ -62,23 +73,28 @@ data class CheckoutUiState(
 
     val splitParts: List<Money>
         get() = if (amountMode == AmountMode.SPLIT && tab != null) {
-            SplitCalculator.splitRemaining(tab.remaining, splitPeople)
+            SplitCalculator.splitRemaining(tab.remainingWithPending, splitPeople)
         } else emptyList()
 
     val change: Money?
         get() = receivedCents?.let { SplitCalculator.change(amountToCharge, Money(it)) }
 
     val validation: PartialValidation
-        get() = tab?.let { SplitCalculator.validatePartial(amountToCharge, it.remaining) } ?: PartialValidation.Valid
+        get() = tab?.let { SplitCalculator.validatePartial(amountToCharge, it.remainingWithPending) } ?: PartialValidation.Valid
 
     val canCharge: Boolean
         get() = validation is PartialValidation.Valid &&
             !isProcessingPayment &&
             (selectedMethod != PaymentUiMethod.CASH || receivedCents == null || receivedCents >= amountToCharge.cents)
 
-    /** Depois deste pagamento a conta fica quitada? Decide o texto do botão. */
+    /**
+     * Depois deste pagamento a conta fica quitada? Decide o texto do botão.
+     * Usa `remainingWithPending` (não `tab.isFullyPaid`, que é só o saldo
+     * OFICIAL do servidor) — sem isso, cobrar o valor cheio com pendente não
+     * fecharia a comanda automaticamente até o item sincronizar de verdade.
+     */
     val settlesTab: Boolean
-        get() = tab != null && amountToCharge.cents >= tab.remaining.cents
+        get() = tab != null && amountToCharge.cents >= tab.remainingWithPending.cents
 }
 
 /** Cobrança já capturada na adquirente, aguardando registro no Nokta. */
@@ -93,12 +109,19 @@ data class PendingRegistration(
  * Fechamento de comanda/mesa com pagamento total, parcial ou dividido.
  *
  * Duas garantias que não podem ser quebradas:
- *  1. O valor a cobrar sai SEMPRE de `tab.remaining` vindo do servidor. Se
- *     outra maquininha registrou um pagamento no meio, a releitura reflete
- *     isso e o garçom nunca cobra a mais.
+ *  1. O valor a cobrar é `tab.remainingWithPending`: a parte confirmada
+ *     (`tab.remaining`) sai SEMPRE da releitura mais recente do servidor — se
+ *     outra maquininha registrou um pagamento no meio, o garçom nunca cobra a
+ *     mais por causa dela. A parte pendente (`pendingConsumption`) é só o
+ *     consumo que ESTE terminal ainda não sincronizou, invisível a qualquer
+ *     outro terminal, então nunca é contada em dobro entre dois aparelhos.
  *  2. Cartão aprovado + falha de registro NUNCA vira nova cobrança: a
  *     tentativa fica guardada em `pendingRegistration` e o retry reenvia a
  *     mesma `idempotencyKey`, que o backend reconhece.
+ *
+ * Se algum item pendente cobrado aqui for recusado depois pelo servidor, o
+ * `SyncEngine` gera um registro de reconciliação visível na comanda em vez de
+ * ajustar o pagamento sozinho — ver `PaymentReconciliationEntity`.
  */
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
@@ -338,6 +361,18 @@ class CheckoutViewModel @Inject constructor(
                 externalReference = externalReference,
             )
         }.onSuccess { updated ->
+            // `isFullyPaid` usa SÓ o saldo oficial do servidor (`remaining`),
+            // nunca `remainingWithPending` — de propósito: fechar a comanda
+            // (`closeTab`) exige `serverId` e é sempre síncrono contra o
+            // total ATUAL do servidor (ver TabRepository.closeTab); fechar
+            // antes do item pendente sincronizar arriscaria o backend recusar
+            // por total desatualizado, ou pior, fechar uma comanda cujo
+            // consumo real o servidor ainda nem conhece. Cobrar o valor
+            // completo (com pendente) e a comanda continuar "PAYMENT_IN_
+            // PROGRESS" por alguns instantes até a fila do Outbox drenar é o
+            // comportamento correto, não um bug — `isSettledLocally` é quem
+            // decide a mensagem, senão "Faltam R$X" mentiria que falta cobrar
+            // algo que na verdade já foi cobrado e só está sincronizando.
             _state.value = _state.value.copy(
                 tab = updated,
                 isProcessingPayment = false,
@@ -346,7 +381,11 @@ class CheckoutViewModel @Inject constructor(
                 // Depois de um pagamento parcial, o padrão volta a ser "tudo
                 // que falta" — normalmente a próxima pessoa paga o resto.
                 amountMode = AmountMode.FULL,
-                paymentMessage = if (updated.isFullyPaid) "Conta quitada." else "Pagamento registrado. Faltam ${updated.remaining.formatBRL()}.",
+                paymentMessage = when {
+                    updated.isFullyPaid -> "Conta quitada."
+                    updated.isSettledLocally -> "Pagamento registrado. Sincronizando os últimos itens antes de fechar."
+                    else -> "Pagamento registrado. Faltam ${updated.remainingWithPending.formatBRL()}."
+                },
             )
             if (updated.isFullyPaid) closeTab(organizationId, updated)
         }.onFailure { e ->

@@ -104,8 +104,19 @@ class SyncEngine @Inject constructor(
                     // pela cascata abaixo, e pagamento recusado nunca deve
                     // sumir da tela sem alguém decidir o que fazer com o
                     // dinheiro.
+                    //
+                    // `discardRejectedOrder` (não o antigo `discardLocalOrder`
+                    // direto) porque o checkout, desde que passou a cobrar
+                    // `remainingWithPending`, pode ter cobrado um valor que já
+                    // incluía este item — se algum pagamento local o cobria, o
+                    // dinheiro do cliente não bate mais com o consumo aceito
+                    // pelo servidor. Isso nunca é ajustado em silêncio: vira
+                    // registro de reconciliação visível na comanda.
                     if (operation.type == OutboxOperationType.SEND_ORDER) {
-                        tabDao.discardLocalOrder(operation.operationId)
+                        val reconciliationsCreated = tabDao.discardRejectedOrder(operation.operationId, outcome.reason)
+                        if (reconciliationsCreated > 0) {
+                            _events.tryEmit(SyncEvent.PaymentReconciliationRequired(operation.tabLocalId, reconciliationsCreated))
+                        }
                     }
 
                     // Sem serverId, toda operação restante desta comanda
@@ -318,4 +329,13 @@ data class SyncRunResult(val processed: Int, val stoppedByNetwork: Boolean)
 sealed class SyncEvent {
     data class OperationSynced(val type: OutboxOperationType) : SyncEvent()
     data class OperationRejected(val type: OutboxOperationType, val reason: String) : SyncEvent()
+
+    /**
+     * Um item recusado pelo servidor já tinha sido cobrado num pagamento
+     * registrado neste terminal — divergência financeira real, gravada como
+     * [com.nokta.pos.data.local.entity.PaymentReconciliationEntity]. Nunca
+     * ajustado sozinho; este evento só avisa que existe algo a revisar na
+     * comanda (distinto de [OperationRejected], que é informativo e passa).
+     */
+    data class PaymentReconciliationRequired(val tabLocalId: String, val count: Int) : SyncEvent()
 }

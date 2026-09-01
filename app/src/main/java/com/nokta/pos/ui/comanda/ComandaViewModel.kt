@@ -9,6 +9,7 @@ import com.nokta.pos.comanda.data.CancelItemOutcome
 import com.nokta.pos.comanda.data.TabRepository
 import com.nokta.pos.comanda.domain.Tab
 import com.nokta.pos.comanda.domain.TabItem
+import com.nokta.pos.data.local.entity.PaymentReconciliationEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,13 @@ data class ComandaUiState(
     val actionMessage: String? = null,
     val isClosing: Boolean = false,
     val closed: Boolean = false,
+    /**
+     * Divergências financeiras não resolvidas: pagamento já registrado que
+     * cobria um item recusado depois pelo servidor. Persistente — não é um
+     * aviso que passa (ver [SyncEvent.PaymentReconciliationRequired]), fica
+     * visível toda vez que a comanda é aberta até alguém revisar.
+     */
+    val unresolvedReconciliations: List<PaymentReconciliationEntity> = emptyList(),
 )
 
 /**
@@ -70,7 +78,21 @@ class ComandaViewModel @Inject constructor(
 
     init {
         observeTab()
+        observeReconciliations()
         refresh()
+    }
+
+    private fun observeReconciliations() {
+        viewModelScope.launch {
+            tabRepository.observeUnresolvedReconciliations(tabLocalId).collect { entries ->
+                _state.value = _state.value.copy(unresolvedReconciliations = entries)
+            }
+        }
+    }
+
+    /** Gestor/operador confirma que já tratou a divergência (cobrou de novo, estornou, etc. — decisão fora daqui). */
+    fun resolveReconciliation(entry: PaymentReconciliationEntity, note: String) {
+        viewModelScope.launch { tabRepository.resolvePaymentReconciliation(entry, note) }
     }
 
     private fun observeTab() {

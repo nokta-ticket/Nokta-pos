@@ -163,6 +163,19 @@ data class TabPaymentEntity(
     val confirmedAt: String?,
     val syncState: SyncState,
     val createdAtEpochMs: Long,
+    /**
+     * JSON de `List<String>` com o `TabItemEntity.localId` de todo item que
+     * ainda estava PENDENTE (sem `serverId`) no instante em que este
+     * pagamento foi registrado — o valor cobrado no checkout já soma esse
+     * consumo (ver `Tab.remainingWithPending`), então é preciso saber quais
+     * itens especificamente compunham esse total para o caso em que um deles
+     * seja recusado DEPOIS: sem este vínculo não haveria como saber que um
+     * pagamento já registrado "contava" com um item que o servidor nunca
+     * aceitou (ver `SyncEngine`, tratamento de `SEND_ORDER` rejeitado).
+     * Vazio/nulo para pagamentos gravados antes deste campo existir ou que
+     * não cobriam nenhum pendente.
+     */
+    val coveredPendingItemIdsJson: String? = null,
 )
 
 /**

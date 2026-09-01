@@ -84,6 +84,15 @@ class TabRepository @Inject constructor(
 
     suspend fun getCachedTab(localId: String): Tab? = tabDao.getTabWithDetails(localId)?.toDomain()
 
+    /** Divergências financeiras não resolvidas desta comanda — ver [PaymentReconciliationEntity]. */
+    fun observeUnresolvedReconciliations(tabLocalId: String): Flow<List<com.nokta.pos.data.local.entity.PaymentReconciliationEntity>> =
+        tabDao.observePaymentReconciliations(tabLocalId).map { it.filter { entry -> !entry.isResolved } }
+
+    /** Gestor/operador confirma que já tratou a divergência — decisão de negócio fora do escopo deste registro. */
+    suspend fun resolvePaymentReconciliation(entry: com.nokta.pos.data.local.entity.PaymentReconciliationEntity, note: String) {
+        tabDao.updatePaymentReconciliation(entry.copy(resolvedAtEpochMs = System.currentTimeMillis(), resolvedNote = note.trim().ifBlank { null }))
+    }
+
     /**
      * Resolve o `localId` a partir de um `Tab.id` (Long — o mesmo formato
      * gravado em [com.nokta.pos.payment.cielo.PendingCieloAttempt.tabId]):
@@ -612,6 +621,14 @@ class TabRepository @Inject constructor(
      * offline (ver OutboxModels.kt para a distinção completa de política por
      * método). Pagamento em CARTÃO nunca passa por aqui offline — só depois
      * de aprovado pela adquirente, com o mesmo raciocínio.
+     *
+     * O valor cobrado (`amount`) já pode incluir consumo ainda pendente de
+     * sincronização (ver `Tab.remainingWithPending`, usado pelo checkout) —
+     * gravamos aqui QUAIS itens pendentes compunham esse total no instante da
+     * cobrança (`coveredPendingItemIdsJson`). É o vínculo que permite, se um
+     * desses itens for recusado depois pelo servidor, reconhecer que este
+     * pagamento já contava com ele (ver `SyncEngine`, branch `Rejected` de
+     * `SEND_ORDER`) em vez de a recusa passar em silêncio.
      */
     suspend fun registerPayment(
         organizationId: Long,
@@ -623,12 +640,17 @@ class TabRepository @Inject constructor(
         externalReference: String? = null,
     ): Tab {
         val now = System.currentTimeMillis()
+        val pendingItemIds = tabDao.getTabWithDetails(tabLocalId)?.items
+            ?.filter { it.serverId == null && it.status != "CANCELED" }
+            ?.map { it.localId }
+            ?: emptyList()
         tabDao.upsertPayment(
             TabPaymentEntity(
                 localId = idempotencyKey, serverId = null, tabLocalId = tabLocalId, method = method,
                 amountCents = amount.cents, receivedCents = receivedCents, changeCents = receivedCents?.let { (it - amount.cents).coerceAtLeast(0) },
                 isCanceled = false, externalReference = externalReference, confirmedAt = null,
                 syncState = SyncState.PENDING, createdAtEpochMs = now,
+                coveredPendingItemIdsJson = if (pendingItemIds.isEmpty()) null else json.encodeToString(pendingItemIds),
             ),
         )
 

@@ -261,6 +261,30 @@ data class Tab(
 
     val hasPendingConsumption: Boolean get() = pendingConsumption.isPositive()
 
+    /**
+     * Pagamentos registrados NESTE terminal que ainda não foram confirmados
+     * pelo servidor (`serverId == null` -> [LocalSyncState.PENDING]) — nunca
+     * cancelados. Só existe para a UI comunicar "já foi cobrado, aguardando
+     * sincronizar" (ver [ComandaScreen]); [paid]/[remaining] continuam vindo
+     * só do servidor, nunca recalculados a partir disto (mesma garantia do
+     * comentário desta classe: o app não decide sozinho quanto já foi pago).
+     */
+    val pendingPayments get() = payments.filter { it.syncState == LocalSyncState.PENDING && !it.isCanceled }
+
+    val pendingPaymentsTotal: Money get() = Money.sum(pendingPayments.map { it.amount })
+
+    val hasPendingPayment: Boolean get() = pendingPayments.isNotEmpty()
+
+    /**
+     * A conta já foi coberta do ponto de vista do OPERADOR — cobrou o valor
+     * completo (com pendente), mesmo que o servidor ainda não tenha
+     * confirmado nem o consumo nem o pagamento. Distinto de [isFullyPaid],
+     * que exige confirmação real do servidor antes de permitir fechar a
+     * comanda (`TabRepository.closeTab` sempre exige rede).
+     */
+    val isSettledLocally: Boolean
+        get() = (paid + pendingPaymentsTotal).cents >= totalWithPending.cents
+
     val isFullyPaid get() = remaining.isZeroOrNegative()
     val hasPartialPayment get() = paid.isPositive() && !isFullyPaid
 

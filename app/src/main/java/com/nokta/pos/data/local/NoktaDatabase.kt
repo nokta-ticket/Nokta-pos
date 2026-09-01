@@ -16,6 +16,7 @@ import com.nokta.pos.data.local.entity.ModifierOptionEntity
 import com.nokta.pos.data.local.entity.OutboxEntity
 import com.nokta.pos.data.local.entity.OutboxOperationType
 import com.nokta.pos.data.local.entity.OutboxStatus
+import com.nokta.pos.data.local.entity.PaymentReconciliationEntity
 import com.nokta.pos.data.local.entity.SyncState
 import com.nokta.pos.data.local.entity.TabEntity
 import com.nokta.pos.data.local.entity.TabItemEntity
@@ -62,8 +63,9 @@ class EnumConverters {
         TabPaymentEntity::class,
         VenueTableEntity::class,
         OutboxEntity::class,
+        PaymentReconciliationEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)

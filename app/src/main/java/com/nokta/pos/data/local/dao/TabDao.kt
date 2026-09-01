@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import com.nokta.pos.data.local.entity.PaymentReconciliationEntity
 import com.nokta.pos.data.local.entity.SyncState
 import com.nokta.pos.data.local.entity.TabEntity
 import com.nokta.pos.data.local.entity.TabItemEntity
@@ -14,6 +15,9 @@ import com.nokta.pos.data.local.entity.TabPaymentEntity
 import com.nokta.pos.data.local.entity.TabWithItemsAndPayments
 import com.nokta.pos.data.local.entity.VenueTableEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import java.util.UUID
 
 @Dao
 interface TabDao {
@@ -130,6 +134,9 @@ interface TabDao {
     @Query("SELECT * FROM tab_item WHERE localId = :localId")
     suspend fun getItemByLocalId(localId: String): TabItemEntity?
 
+    @Query("SELECT * FROM tab_item WHERE orderLocalId = :orderLocalId")
+    suspend fun getItemsByOrderLocalId(orderLocalId: String): List<TabItemEntity>
+
     /** Usado pelo SyncEngine para localizar o registro local a partir do serverId gravado no payload do Outbox (CANCEL_ITEM). */
     @Query("SELECT * FROM tab_item WHERE serverId = :serverId")
     suspend fun getItemByServerId(serverId: Long): TabItemEntity?
@@ -160,6 +167,65 @@ interface TabDao {
         deleteOrderByLocalId(orderLocalId)
     }
 
+    /**
+     * Mesma função de [discardLocalOrder], mas para quando o pedido foi
+     * recusado depois de sincronizado — ver [SyncEngine] (branch `Rejected`
+     * de `SEND_ORDER`). Antes de descartar, verifica se algum pagamento já
+     * registrado neste terminal (`TabPaymentEntity.coveredPendingItemIdsJson`)
+     * contava com algum item deste pedido no valor cobrado — se sim, o
+     * cliente já foi cobrado por um consumo que o servidor nunca aceitou.
+     * Isso nunca é corrigido ajustando o pagamento em silêncio: vira um
+     * [PaymentReconciliationEntity] por item afetado, que fica visível na
+     * comanda até alguém revisar manualmente.
+     *
+     * Itens que nenhum pagamento cobria (caso comum: recusado antes de
+     * qualquer cobrança) são descartados sem gerar reconciliação — não há
+     * divergência financeira a registrar.
+     */
+    @Transaction
+    suspend fun discardRejectedOrder(orderLocalId: String, rejectionReason: String): Int {
+        val rejectedItems = getItemsByOrderLocalId(orderLocalId)
+        if (rejectedItems.isEmpty()) {
+            discardLocalOrder(orderLocalId)
+            return 0
+        }
+        val tabLocalId = rejectedItems.first().tabLocalId
+        val payments = getPaymentsForTab(tabLocalId)
+        val now = System.currentTimeMillis()
+        val json = Json { ignoreUnknownKeys = true }
+        var reconciliationsCreated = 0
+
+        for (item in rejectedItems) {
+            val coveringPayment = payments.firstOrNull { payment ->
+                !payment.isCanceled &&
+                    payment.coveredPendingItemIdsJson
+                        ?.let { raw -> runCatching { json.decodeFromString<List<String>>(raw) }.getOrNull() }
+                        ?.contains(item.localId) == true
+            }
+            if (coveringPayment != null) {
+                val description = buildString {
+                    append(item.productName.ifBlank { "Item" })
+                    if (item.variantName.isNotBlank() && item.variantName != item.productName) append(" — ${item.variantName}")
+                    append(" (${item.quantity}x)")
+                }
+                insertPaymentReconciliation(
+                    PaymentReconciliationEntity(
+                        localId = UUID.randomUUID().toString(),
+                        tabLocalId = tabLocalId,
+                        paymentLocalId = coveringPayment.localId,
+                        rejectedItemDescription = description,
+                        rejectedItemAmountCents = item.lineTotalCents,
+                        rejectionReason = rejectionReason,
+                        createdAtEpochMs = now,
+                    ),
+                )
+                reconciliationsCreated++
+            }
+        }
+        discardLocalOrder(orderLocalId)
+        return reconciliationsCreated
+    }
+
     @Query("DELETE FROM tab_item WHERE orderLocalId = :orderLocalId")
     suspend fun deleteItemsForOrder(orderLocalId: String)
 
@@ -176,6 +242,26 @@ interface TabDao {
 
     @Query("DELETE FROM tab_payment WHERE tabLocalId = :tabLocalId")
     suspend fun deletePaymentsForTab(tabLocalId: String)
+
+    @Query("SELECT * FROM tab_payment WHERE tabLocalId = :tabLocalId")
+    suspend fun getPaymentsForTab(tabLocalId: String): List<TabPaymentEntity>
+
+    @Update
+    suspend fun updatePayment(payment: TabPaymentEntity)
+
+    // ---- Reconciliação de pagamento x item recusado ----
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPaymentReconciliation(entry: PaymentReconciliationEntity)
+
+    @Query("SELECT * FROM payment_reconciliation WHERE tabLocalId = :tabLocalId ORDER BY createdAtEpochMs DESC")
+    fun observePaymentReconciliations(tabLocalId: String): Flow<List<PaymentReconciliationEntity>>
+
+    @Query("SELECT COUNT(*) FROM payment_reconciliation WHERE tabLocalId = :tabLocalId AND resolvedAtEpochMs IS NULL")
+    fun observeUnresolvedReconciliationCount(tabLocalId: String): Flow<Int>
+
+    @Update
+    suspend fun updatePaymentReconciliation(entry: PaymentReconciliationEntity)
 
     // ---- Mesas ----
 

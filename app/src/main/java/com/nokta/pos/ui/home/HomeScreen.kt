@@ -103,6 +103,7 @@ fun HomeScreen(
         onOpenCashWarning = viewModel::openCashWarningDialog,
         onDismissCashWarning = viewModel::dismissCashWarningDialog,
         onDismissSyncRejection = viewModel::dismissSyncRejection,
+        onDismissPaymentReconciliationMessage = viewModel::dismissPaymentReconciliationMessage,
     )
 }
 
@@ -138,6 +139,7 @@ fun HomeContent(
     onOpenCashWarning: () -> Unit = {},
     onDismissCashWarning: () -> Unit = {},
     onDismissSyncRejection: () -> Unit = {},
+    onDismissPaymentReconciliationMessage: () -> Unit = {},
 ) {
     val access = state.access
 
@@ -273,6 +275,14 @@ fun HomeContent(
             SyncRejectionDialog(reason = reason, onDismiss = onDismissSyncRejection)
         }
 
+        // Distinto do aviso acima: aqui já existia dinheiro cobrado do
+        // cliente contando com o item recusado. Fechar este diálogo não
+        // resolve nada — a divergência fica registrada e visível na tela da
+        // comanda até alguém revisar; isto é só o alerta imediato.
+        state.paymentReconciliationMessage?.let { message ->
+            PaymentReconciliationDialog(message = message, onDismiss = onDismissPaymentReconciliationMessage)
+        }
+
         if (state.logoutConfirmationOpen) {
             LogoutConfirmationDialog(
                 onConfirm = onConfirmLogoutOffline,
@@ -344,6 +354,25 @@ private fun SyncRejectionDialog(reason: String, onDismiss: () -> Unit) {
         },
         title = { Text("Lançamento não aceito") },
         text = { Text("$reason\n\nO item foi removido da comanda. Se ainda for necessário, lance de novo.") },
+    )
+}
+
+/**
+ * Um item recusado na sincronização já constava num pagamento cobrado do
+ * cliente NESTE terminal — diferente de [SyncRejectionDialog] (item que
+ * nunca chegou a ser cobrado). Fechar este diálogo é só reconhecer o
+ * aviso: a divergência em si (PaymentReconciliationEntity) fica registrada
+ * e visível na tela da comanda até alguém revisar de verdade.
+ */
+@Composable
+private fun PaymentReconciliationDialog(message: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Entendi") }
+        },
+        title = { Text("Divergência de pagamento") },
+        text = { Text(message) },
     )
 }
 
