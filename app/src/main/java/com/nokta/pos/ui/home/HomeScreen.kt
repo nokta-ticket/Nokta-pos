@@ -65,6 +65,7 @@ fun HomeScreen(
     onNovaVenda: () -> Unit,
     onMesas: () -> Unit,
     onComandas: () -> Unit,
+    onAbertas: () -> Unit,
     onHistorico: () -> Unit,
     onOpenTab: (String) -> Unit,
     onLogout: () -> Unit,
@@ -86,6 +87,7 @@ fun HomeScreen(
         onNovaVenda = onNovaVenda,
         onMesas = onMesas,
         onComandas = onComandas,
+        onAbertas = onAbertas,
         onHistorico = onHistorico,
         onLogout = { viewModel.requestLogout(onLogout) },
         onConfirmLogoutOffline = { viewModel.confirmLogoutOffline(onLogout) },
@@ -113,6 +115,7 @@ fun HomeContent(
     onNovaVenda: () -> Unit,
     onMesas: () -> Unit,
     onComandas: () -> Unit,
+    onAbertas: () -> Unit,
     onHistorico: () -> Unit,
     onLogout: () -> Unit,
     onConfirmLogoutOffline: () -> Unit = {},
@@ -207,7 +210,7 @@ fun HomeContent(
                     Spacer(Modifier.height(18.dp))
                     ShortcutsRow(
                         openTabsCount = state.openTabsCount,
-                        onOpenTabs = onComandas,
+                        onOpenTabs = onAbertas,
                         onHistory = onHistorico,
                     )
                 }

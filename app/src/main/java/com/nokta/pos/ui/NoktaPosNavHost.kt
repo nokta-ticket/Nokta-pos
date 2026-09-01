@@ -4,9 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -15,16 +12,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.nokta.pos.session.DeviceEvents
 import com.nokta.pos.session.SessionEvents
+import com.nokta.pos.ui.abertas.AbertasScreen
 import com.nokta.pos.ui.cardapio.CardapioScreen
 import com.nokta.pos.ui.checkout.CheckoutScreen
 import com.nokta.pos.ui.comanda.ComandaScreen
+import com.nokta.pos.ui.comandas.ComandasScreen
 import com.nokta.pos.ui.components.PosLoading
 import com.nokta.pos.ui.historico.HistoricoScreen
 import com.nokta.pos.ui.home.HomeScreen
 import com.nokta.pos.ui.login.LoginScreen
 import com.nokta.pos.ui.mesa.MesasScreen
-import com.nokta.pos.ui.orders.ComandaType
-import com.nokta.pos.ui.orders.OpenComandaScreen
 import com.nokta.pos.ui.pairing.PairingScreen
 import com.nokta.pos.ui.splash.SplashViewModel
 import com.nokta.pos.ui.splash.StartDestination
@@ -38,6 +35,7 @@ object Routes {
     const val NOVA_VENDA = "nova-venda"
     const val MESAS = "mesas"
     const val BUSCAR_COMANDA = "buscar-comanda"
+    const val ABERTAS = "abertas"
     const val HISTORICO = "historico"
     const val COMANDA = "comanda/{tabId}"
     const val CARDAPIO = "cardapio/{tabId}"
@@ -135,6 +133,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
                 onNovaVenda = { navController.navigate(Routes.NOVA_VENDA) },
                 onMesas = { navController.navigate(Routes.MESAS) },
                 onComandas = { navController.navigate(Routes.BUSCAR_COMANDA) },
+                onAbertas = { navController.navigate(Routes.ABERTAS) },
                 onHistorico = { navController.navigate(Routes.HISTORICO) },
                 onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onLogout = {
@@ -157,20 +156,32 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             )
         }
 
-        // Ainda sem lógica de vinculação (backend/regra de negócio em
-        // definição) — por ora só a navegação e o estado local de
-        // tipo/código, ver OpenComandaScreen. A lista antiga de comandas
-        // (Abertas/Encerradas, ComandasScreen) saiu da navegação por ora.
+        // Fluxo simplificado por pulseira/cartão físico (ver ComandasViewModel):
+        // o garçom digita só o número + tipo, o backend decide o resultado —
+        // abre direto ou pede vinculação de cliente. Substitui o antigo
+        // OpenComandaScreen (mesa/comanda genérica, mantido em ui/orders sem
+        // nenhuma tela apontando pra ele). A lista antiga de comandas
+        // (Abertas/Encerradas, ComandasScreen em ui/comanda) saiu da
+        // navegação por ora — não confundir os dois pacotes "comanda"/"comandas".
         composable(Routes.BUSCAR_COMANDA) {
-            var type by remember { mutableStateOf(ComandaType.WRISTBAND) }
-            var code by remember { mutableStateOf("") }
-            OpenComandaScreen(
-                selectedType = type,
-                code = code,
-                onSelectType = { type = it; code = "" },
-                onCodeChange = { code = it },
+            ComandasScreen(
+                // Sem popUpTo: a tela de Comandas continua na pilha, então
+                // "voltar" de dentro da comanda aberta retorna pra cá (e não
+                // pra Home, como acontecia antes — ver ComandaScreen abaixo).
+                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
                 onBack = { navController.popBackStack() },
-                onContinue = { /* TODO: vinculação de comanda por pulseira/cartão físico */ },
+            )
+        }
+
+        // Card "Abertas" da Home: tudo que está fisicamente em atendimento
+        // agora, misturado (mesa + cartão físico + pulseira) — distinto das
+        // listas "Em atendimento" já existentes dentro de Mesas (só TABLE) e
+        // Comandas (só o tipo da aba selecionada). Rota própria: antes este
+        // card reaproveitava por engano o mesmo destino do botão "Comandas".
+        composable(Routes.ABERTAS) {
+            AbertasScreen(
+                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -187,7 +198,12 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
                 tabId = tabId,
                 onAddProducts = { navController.navigate(Routes.cardapio(tabId)) },
                 onCheckout = { navController.navigate(Routes.checkout(tabId)) },
-                onBack = { navController.popBackStack(Routes.HOME, inclusive = false) },
+                // Volta pra quem abriu esta comanda (Comandas, Mesas, Abertas
+                // ou Histórico — nenhum deles remove mais a si mesmo da
+                // pilha ao navegar pra cá). popBackStack() simples, com
+                // fallback pra HOME só na hipótese de a pilha ter esvaziado
+                // por algum outro caminho (ex.: deep link direto).
+                onBack = { if (!navController.popBackStack()) navController.navigate(Routes.HOME) },
             )
         }
 

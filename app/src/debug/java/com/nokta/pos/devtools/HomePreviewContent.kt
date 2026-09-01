@@ -89,6 +89,7 @@ fun HomePreviewContent(variant: String? = null) {
         onNovaVenda = {},
         onMesas = {},
         onComandas = {},
+        onAbertas = {},
         onHistorico = {},
         onLogout = {},
     )
