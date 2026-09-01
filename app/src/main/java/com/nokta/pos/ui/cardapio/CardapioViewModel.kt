@@ -12,6 +12,7 @@ import com.nokta.pos.cart.Cart
 import com.nokta.pos.cart.CartLine
 import com.nokta.pos.cart.CartLineModifier
 import com.nokta.pos.comanda.data.TabRepository
+import com.nokta.pos.network.humanizedApiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -285,12 +286,15 @@ class CardapioViewModel @Inject constructor(
                     onDone()
                 }
                 .onFailure { e ->
-                    // Só chega aqui em erro de NEGÓCIO (comanda fechada, item
-                    // indisponível) — falta de rede já foi absorvida pelo
-                    // repository, que enfileirou e devolveu sucesso.
+                    // Só chega aqui em erro de NEGÓCIO (caixa fechado, comanda
+                    // fechada, item indisponível) — falta de rede já foi
+                    // absorvida pelo repository, que enfileirou e devolveu
+                    // sucesso. `humanizedApiMessage` lê a mensagem real do
+                    // backend; `e.message` cru seria só "HTTP 400 Bad Request",
+                    // que não diz ao operador o que fazer.
                     _state.value = _state.value.copy(
                         isSubmittingOrder = false,
-                        submitError = e.message ?: "Não foi possível enviar o pedido.",
+                        submitError = e.humanizedApiMessage("Não foi possível enviar o pedido."),
                     )
                 }
         }

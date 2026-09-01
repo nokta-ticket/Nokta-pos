@@ -96,6 +96,18 @@ class SyncEngine @Inject constructor(
                     processed++
                     _events.tryEmit(SyncEvent.OperationRejected(operation.type, outcome.reason))
 
+                    // Pedido recusado pelo servidor nunca vai existir — sem
+                    // apagar o rascunho local, o item ficava para sempre na
+                    // comanda como "Enviado" de R$ 0,00, e o operador continuava
+                    // vendo (e servindo) um consumo que o sistema recusou e
+                    // ninguém iria cobrar. Só SEND_ORDER: CREATE_TAB é tratado
+                    // pela cascata abaixo, e pagamento recusado nunca deve
+                    // sumir da tela sem alguém decidir o que fazer com o
+                    // dinheiro.
+                    if (operation.type == OutboxOperationType.SEND_ORDER) {
+                        tabDao.discardLocalOrder(operation.operationId)
+                    }
+
                     // Sem serverId, toda operação restante desta comanda
                     // (SEND_ORDER/REGISTER_PAYMENT, que dependem do serverId
                     // que só o CREATE_TAB cria) nunca teria como ser aceita —

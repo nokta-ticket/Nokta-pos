@@ -149,6 +149,23 @@ interface TabDao {
     @Query("SELECT * FROM tab_order WHERE localId = :localId")
     suspend fun getOrderByLocalId(localId: String): TabOrderEntity?
 
+    /**
+     * Desfaz o rascunho otimista de um pedido que o SERVIDOR RECUSOU por regra
+     * de negócio (4xx) — ver TabRepository.submitOrder. Só para esse caso:
+     * falha de rede nunca apaga nada, vai pro Outbox e sincroniza depois.
+     */
+    @Transaction
+    suspend fun discardLocalOrder(orderLocalId: String) {
+        deleteItemsForOrder(orderLocalId)
+        deleteOrderByLocalId(orderLocalId)
+    }
+
+    @Query("DELETE FROM tab_item WHERE orderLocalId = :orderLocalId")
+    suspend fun deleteItemsForOrder(orderLocalId: String)
+
+    @Query("DELETE FROM tab_order WHERE localId = :localId")
+    suspend fun deleteOrderByLocalId(localId: String)
+
     // ---- Pagamentos ----
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

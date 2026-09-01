@@ -427,6 +427,24 @@ class TabRepository @Inject constructor(
             refreshFromServer(organizationId, tabLocalId, serverId)
         } catch (e: IOException) {
             enqueueSubmitOrder(organizationId, tabLocalId, orderLocalId, request)
+        } catch (e: HttpException) {
+            // RECUSA DE NEGÓCIO (4xx), não falha de rede: o servidor decidiu
+            // que este pedido não pode existir (caixa fechado, comanda já
+            // encerrada, produto indisponível). Sem isto, o rascunho otimista
+            // gravado no Room lá em cima ficava para sempre na tela como um
+            // item fantasma "Enviado" de R$ 0,00 — e o operador via o toast de
+            // sucesso, entregava a bebida e ninguém cobrava por ela.
+            //
+            // Reenviar não adianta (a recusa é determinística, não transitória),
+            // então nunca vai pro Outbox: desfaz o rascunho e propaga o erro
+            // pra tela mostrar o motivo real ao operador.
+            if (e.code() in 400..499) {
+                tabDao.discardLocalOrder(orderLocalId)
+                throw e
+            }
+            // 5xx é falha do servidor, tratada como indisponibilidade
+            // temporária — mesmo caminho de IOException.
+            enqueueSubmitOrder(organizationId, tabLocalId, orderLocalId, request)
         }
     }
 
