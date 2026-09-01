@@ -130,14 +130,14 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
 
         composable(Routes.HOME) {
             HomeScreen(
-                onNovaVenda = { navController.navigate(Routes.NOVA_VENDA) },
-                onMesas = { navController.navigate(Routes.MESAS) },
-                onComandas = { navController.navigate(Routes.BUSCAR_COMANDA) },
-                onAbertas = { navController.navigate(Routes.ABERTAS) },
-                onHistorico = { navController.navigate(Routes.HISTORICO) },
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
+                onNovaVenda = { navController.navigateOnce(Routes.NOVA_VENDA) },
+                onMesas = { navController.navigateOnce(Routes.MESAS) },
+                onComandas = { navController.navigateOnce(Routes.BUSCAR_COMANDA) },
+                onAbertas = { navController.navigateOnce(Routes.ABERTAS) },
+                onHistorico = { navController.navigateOnce(Routes.HISTORICO) },
+                onOpenTab = { tabId -> navController.navigateOnce(Routes.comanda(tabId)) },
                 onLogout = {
-                    navController.navigate(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
+                    navController.navigateOnce(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
                 },
             )
         }
@@ -145,14 +145,14 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         composable(Routes.NOVA_VENDA) {
             NovaVendaScreen(
                 onFinished = { navController.popBackStack(Routes.HOME, inclusive = false) },
-                onBack = { navController.popBackStack() },
+                onBack = { navController.popBackStackOnce() },
             )
         }
 
         composable(Routes.MESAS) {
             MesasScreen(
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
-                onBack = { navController.popBackStack() },
+                onOpenTab = { tabId -> navController.navigateOnce(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStackOnce() },
             )
         }
 
@@ -168,8 +168,8 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
                 // Sem popUpTo: a tela de Comandas continua na pilha, então
                 // "voltar" de dentro da comanda aberta retorna pra cá (e não
                 // pra Home, como acontecia antes — ver ComandaScreen abaixo).
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
-                onBack = { navController.popBackStack() },
+                onOpenTab = { tabId -> navController.navigateOnce(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStackOnce() },
             )
         }
 
@@ -180,15 +180,15 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
         // card reaproveitava por engano o mesmo destino do botão "Comandas".
         composable(Routes.ABERTAS) {
             AbertasScreen(
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
-                onBack = { navController.popBackStack() },
+                onOpenTab = { tabId -> navController.navigateOnce(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStackOnce() },
             )
         }
 
         composable(Routes.HISTORICO) {
             HistoricoScreen(
-                onOpenTab = { tabId -> navController.navigate(Routes.comanda(tabId)) },
-                onBack = { navController.popBackStack() },
+                onOpenTab = { tabId -> navController.navigateOnce(Routes.comanda(tabId)) },
+                onBack = { navController.popBackStackOnce() },
             )
         }
 
@@ -196,14 +196,19 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             val tabId = entry.arguments!!.getString("tabId")!!
             ComandaScreen(
                 tabId = tabId,
-                onAddProducts = { navController.navigate(Routes.cardapio(tabId)) },
-                onCheckout = { navController.navigate(Routes.checkout(tabId)) },
+                onAddProducts = { navController.navigateOnce(Routes.cardapio(tabId)) },
+                onCheckout = { navController.navigateOnce(Routes.checkout(tabId)) },
                 // Volta pra quem abriu esta comanda (Comandas, Mesas, Abertas
                 // ou Histórico — nenhum deles remove mais a si mesmo da
-                // pilha ao navegar pra cá). popBackStack() simples, com
-                // fallback pra HOME só na hipótese de a pilha ter esvaziado
-                // por algum outro caminho (ex.: deep link direto).
-                onBack = { if (!navController.popBackStack()) navController.navigate(Routes.HOME) },
+                // pilha ao navegar pra cá). O fallback pra HOME cobre a
+                // hipótese de a pilha ter esvaziado por outro caminho (ex.:
+                // deep link direto) — nunca deixa o NavHost sem destino, que
+                // é o que renderizava a tela em branco.
+                onBack = {
+                    if (!navController.popBackStackOnce()) {
+                        navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
+                    }
+                },
             )
         }
 
@@ -214,7 +219,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             CardapioScreen(
                 title = "Adicionar itens",
                 confirmLabel = "Enviar pedido",
-                onDone = { navController.popBackStack() },
+                onDone = { navController.popBackStackOnce() },
             )
         }
 
@@ -223,7 +228,7 @@ fun NoktaPosNavHost(navController: NavHostController, sessionEvents: SessionEven
             CheckoutScreen(
                 tabId = tabId,
                 onTabClosed = { navController.popBackStack(Routes.HOME, inclusive = false) },
-                onBack = { navController.popBackStack() },
+                onBack = { navController.popBackStackOnce() },
             )
         }
     }
