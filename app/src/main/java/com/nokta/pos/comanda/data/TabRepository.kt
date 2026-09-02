@@ -562,10 +562,16 @@ class TabRepository @Inject constructor(
      * inteira (auditoria exige motivo) e, se sobrar quantidade, relançar um
      * pedido novo com `quantity - 1`. Do ponto de vista do operador é só o
      * número descendo; por baixo fica um cancelamento + um novo lançamento.
+     *
+     * `reason` é sempre o texto real escolhido pelo operador — nunca um
+     * texto fixo. Corrigir "lancei 5, eram 4" é o caminho mais rápido de
+     * mexer numa comanda, e por isso o de maior risco de fraude/erro não
+     * rastreado: sem o motivo real aqui, a auditoria não distingue "digitei
+     * errado" de "cliente devolveu" de "bar serviu a mais".
      */
-    suspend fun decreaseItemQuantity(organizationId: Long, item: com.nokta.pos.comanda.domain.TabItem): CancelItemOutcome {
+    suspend fun decreaseItemQuantity(organizationId: Long, item: com.nokta.pos.comanda.domain.TabItem, reason: String): CancelItemOutcome {
         val entity = tabDao.getItemByLocalId(item.localId) ?: return CancelItemOutcome.NotFound
-        val outcome = cancelItem(organizationId, item.localId, reason = "Ajuste de quantidade pelo operador")
+        val outcome = cancelItem(organizationId, item.localId, reason = reason)
         if (outcome == CancelItemOutcome.NotFound) return outcome
 
         // Success, RemovedLocalDraft e QueuedOffline liberam o relançamento —

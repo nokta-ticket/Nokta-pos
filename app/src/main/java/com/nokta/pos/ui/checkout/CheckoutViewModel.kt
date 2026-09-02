@@ -47,8 +47,14 @@ data class CheckoutUiState(
     val pendingRegistration: PendingRegistration? = null,
     /** Modo de edição inline do resumo do pedido (+/−/remover por item). */
     val isEditingOrder: Boolean = false,
-    /** Item aguardando confirmação de remoção (quantidade chegando a 0, ou lixeira). */
-    val pendingRemoveItem: TabItem? = null,
+    /**
+     * Ajuste de quantidade aguardando motivo do operador — tanto o "−" que
+     * reduz 1 unidade quanto a lixeira que remove o item inteiro passam por
+     * aqui. Nunca é aplicado sem motivo: é o caminho mais rápido de mexer
+     * numa comanda ("lancei 5, eram 4"), e por isso o de maior risco de
+     * fraude/erro não rastreado se ficasse silencioso.
+     */
+    val pendingQuantityAdjustment: PendingQuantityAdjustment? = null,
 ) {
     /**
      * Valor que será cobrado nesta operação — inclui consumo ainda pendente
@@ -104,6 +110,13 @@ data class PendingRegistration(
     val method: String,
     val externalReference: String?,
 )
+
+/**
+ * `willRemoveCompletely`: `true` quando o ajuste zera a quantidade (lixeira,
+ * ou "−" na última unidade) — só muda o texto mostrado ao operador, a
+ * exigência de motivo é a mesma nos dois casos.
+ */
+data class PendingQuantityAdjustment(val item: TabItem, val willRemoveCompletely: Boolean)
 
 /**
  * Fechamento de comanda/mesa com pagamento total, parcial ou dividido.
@@ -227,37 +240,43 @@ class CheckoutViewModel @Inject constructor(
     }
 
     /**
-     * "−": com quantidade > 1, diminui 1 unidade direto (sem confirmação —
-     * ainda sobra pelo menos 1). Com quantidade 1, pede confirmação antes de
-     * remover o item por completo (ver [confirmRemoveItem]/[dismissRemoveItem]).
+     * "−": sempre pede motivo antes de aplicar, com quantidade > 1 ou não —
+     * é o caminho mais rápido de corrigir uma comanda ("lancei 5, eram 4") e
+     * por isso o de maior risco se ficasse sem confirmação nem auditoria.
      */
     fun decreaseItem(item: TabItem) {
-        if (item.quantity <= 1) {
-            _state.value = _state.value.copy(pendingRemoveItem = item)
-            return
-        }
-        applyDecrease(item)
+        _state.value = _state.value.copy(
+            pendingQuantityAdjustment = PendingQuantityAdjustment(item, willRemoveCompletely = item.quantity <= 1),
+        )
     }
 
-    /** Lixeira: sempre pede confirmação, independente da quantidade. */
+    /** Lixeira: sempre remove o item inteiro, mesmo motivo obrigatório do "−". */
     fun requestRemoveItem(item: TabItem) {
-        _state.value = _state.value.copy(pendingRemoveItem = item)
+        _state.value = _state.value.copy(
+            pendingQuantityAdjustment = PendingQuantityAdjustment(item, willRemoveCompletely = true),
+        )
     }
 
-    fun dismissRemoveItem() {
-        _state.value = _state.value.copy(pendingRemoveItem = null)
+    fun dismissQuantityAdjustment() {
+        _state.value = _state.value.copy(pendingQuantityAdjustment = null)
     }
 
-    fun confirmRemoveItem() {
-        val item = _state.value.pendingRemoveItem ?: return
-        _state.value = _state.value.copy(pendingRemoveItem = null)
-        applyDecrease(item)
+    /**
+     * `reason` vem sempre do operador (diálogo na tela) — nunca um texto
+     * fixo. É o que a auditoria/prevenção de fraude depende para distinguir
+     * "digitei errado" de "cliente devolveu" de "item veio errado do bar".
+     */
+    fun confirmQuantityAdjustment(reason: String) {
+        val pending = _state.value.pendingQuantityAdjustment ?: return
+        if (reason.isBlank()) return
+        _state.value = _state.value.copy(pendingQuantityAdjustment = null)
+        applyDecrease(pending.item, reason.trim())
     }
 
-    private fun applyDecrease(item: TabItem) {
+    private fun applyDecrease(item: TabItem, reason: String) {
         val organizationId = authRepository.currentOrganizationId() ?: return
         viewModelScope.launch {
-            val outcome = tabRepository.decreaseItemQuantity(organizationId, item)
+            val outcome = tabRepository.decreaseItemQuantity(organizationId, item, reason)
             if (outcome == CancelItemOutcome.QueuedOffline) {
                 _state.value = _state.value.copy(paymentMessage = "Sem conexão: item ajustado localmente, será sincronizado quando a internet voltar.")
             } else if (outcome == CancelItemOutcome.NotFound) {

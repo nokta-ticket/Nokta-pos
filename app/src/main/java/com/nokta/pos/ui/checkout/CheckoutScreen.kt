@@ -120,8 +120,8 @@ fun CheckoutScreen(
             ) { Text(it) }
         }
 
-        state.pendingRemoveItem?.let { item ->
-            RemoveItemDialog(item = item, onConfirm = viewModel::confirmRemoveItem, onDismiss = viewModel::dismissRemoveItem)
+        state.pendingQuantityAdjustment?.let { adjustment ->
+            QuantityAdjustmentDialog(adjustment = adjustment, onConfirm = viewModel::confirmQuantityAdjustment, onDismiss = viewModel::dismissQuantityAdjustment)
         }
     }
 }
@@ -443,13 +443,62 @@ private fun QuantityStepper(quantity: Int, onIncrease: () -> Unit, onDecrease: (
     }
 }
 
+/**
+ * Ajuste de quantidade — "−" e lixeira passam pelo mesmo diálogo, sempre com
+ * motivo obrigatório (mesmo padrão de [com.nokta.pos.ui.comanda.ComandaScreen]'s
+ * CancelItemDialog). É o caminho mais rápido de corrigir uma comanda
+ * ("lancei 5, eram 4") e por isso o de maior risco de fraude/erro não
+ * rastreado se ficasse sem motivo real.
+ */
 @Composable
-private fun RemoveItemDialog(item: TabItem, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun QuantityAdjustmentDialog(
+    adjustment: PendingQuantityAdjustment,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var reason by remember { mutableStateOf("") }
+    val suggestions = listOf("Lançado a mais", "Erro de digitação", "Item devolvido pelo cliente")
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Remover ${item.productName}?") },
-        text = { Text("Esse item será cancelado da comanda. Essa ação fica registrada na auditoria e não pode ser desfeita.") },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Remover", color = DangerRed) } },
+        title = { Text(if (adjustment.willRemoveCompletely) "Remover ${adjustment.item.productName}?" else "Ajustar quantidade — ${adjustment.item.productName}") },
+        text = {
+            Column {
+                Text(
+                    if (adjustment.willRemoveCompletely) {
+                        "Esse item será cancelado da comanda."
+                    } else {
+                        "De ${adjustment.item.quantity}x para ${adjustment.item.quantity - 1}x."
+                    },
+                    fontSize = 13.5.sp,
+                    color = NoktaMuted,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("Fica registrado com operador, terminal e horário — nada é apagado.", fontSize = 12.sp, color = NoktaMutedSoft)
+                Spacer(Modifier.height(16.dp))
+                suggestions.forEach { suggestion ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = reason == suggestion, onClick = { reason = suggestion })
+                        Text(suggestion, fontSize = 14.sp)
+                    }
+                }
+                OutlinedTextField(
+                    value = if (reason in suggestions) "" else reason,
+                    onValueChange = { reason = it },
+                    label = { Text("Outro motivo") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(reason) }, enabled = reason.isNotBlank()) {
+                Text(if (adjustment.willRemoveCompletely) "Remover" else "Confirmar", color = if (adjustment.willRemoveCompletely) DangerRed else NoktaPurple)
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
