@@ -403,18 +403,29 @@ class BalcaoViewModel @Inject constructor(
         _state.value = _state.value.copy(statusMessage = "Registrando a venda…")
 
         runCatching {
+            // A comanda já existia ANTES desta chamada (2ª+ parte de um
+            // split, ou retry de registro após cartão já aprovado) — nesses
+            // casos o pedido já foi enviado e a comanda está PAYMENT_IN_
+            // PROGRESS (total congelado para cobrança, ver
+            // VenueOrdersService.assertTabEditable no backend), então
+            // reenviar o pedido aqui sempre falha com 400 "Esta comanda não
+            // está aberta para alterações no consumo". Só a 1ª chamada
+            // (comanda recém-aberta agora) precisa/pode enviar o pedido.
+            val tabAlreadyExisted = openedTabLocalId != null
             val tabLocalId = openedTabLocalId ?: tabRepository.openTab(
                 organizationId = organizationId,
                 locationId = locationId,
                 type = TabType.COUNTER,
             ).localId.also { openedTabLocalId = it }
 
-            tabRepository.submitOrder(
-                organizationId = organizationId,
-                tabLocalId = tabLocalId,
-                lines = _state.value.cart.lines.map { it.toOrderLine() },
-                orderLocalId = orderClientRequestId,
-            )
+            if (!tabAlreadyExisted) {
+                tabRepository.submitOrder(
+                    organizationId = organizationId,
+                    tabLocalId = tabLocalId,
+                    lines = _state.value.cart.lines.map { it.toOrderLine() },
+                    orderLocalId = orderClientRequestId,
+                )
+            }
 
             val paidTab = tabRepository.registerPayment(
                 organizationId = organizationId,
