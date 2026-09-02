@@ -163,13 +163,17 @@ class DeviceCredentialsStore @Inject constructor(
      * painel Adquirentes, nunca por organização/unidade) mas chegam aqui do
      * mesmo jeito, via device-login, porque o app não deve embutir segredo
      * nenhum no APK. `merchantCode` é o único dado que É por unidade — o EC
-     * que identifica quem recebe o dinheiro daquela venda.
+     * que identifica quem recebe o dinheiro daquela venda; opcional (a
+     * Cielo não exige EC em Sandbox, só em produção com múltiplos ECs).
      */
-    fun saveCieloCredentials(clientId: String, accessToken: String, merchantCode: String) {
+    fun saveCieloCredentials(clientId: String, accessToken: String, merchantCode: String?) {
         prefs.edit()
             .putString(KEY_CIELO_CLIENT_ID, clientId)
             .putString(KEY_CIELO_ACCESS_TOKEN, accessToken)
-            .putString(KEY_CIELO_MERCHANT_CODE, merchantCode)
+            .apply {
+                if (merchantCode != null) putString(KEY_CIELO_MERCHANT_CODE, merchantCode)
+                else remove(KEY_CIELO_MERCHANT_CODE)
+            }
             .apply()
     }
 
@@ -184,7 +188,7 @@ class DeviceCredentialsStore @Inject constructor(
     override suspend fun current(): CieloCredentials? {
         val clientId = prefs.getString(KEY_CIELO_CLIENT_ID, null) ?: return null
         val accessToken = prefs.getString(KEY_CIELO_ACCESS_TOKEN, null) ?: return null
-        val merchantCode = prefs.getString(KEY_CIELO_MERCHANT_CODE, null) ?: return null
+        val merchantCode = prefs.getString(KEY_CIELO_MERCHANT_CODE, null)
         return CieloCredentials(clientId, accessToken, merchantCode)
     }
 
