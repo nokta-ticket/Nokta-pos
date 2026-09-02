@@ -44,8 +44,14 @@ data class DeviceLoginLocation(val id: Long, val nome: String)
 @Serializable
 data class DeviceLoginMenu(val id: Long, val nome: String)
 
+/**
+ * `clientId`/`accessToken` são GLOBAIS da Nokta (identificam a integração,
+ * não o estabelecimento — cadastrados uma vez pelo SUPER_ADMIN no painel
+ * Adquirentes). `merchantCode` é o único campo por unidade: o EC que
+ * identifica quem recebe o dinheiro daquela venda na Cielo.
+ */
 @Serializable
-data class DeviceLoginCielo(val clientId: String, val accessToken: String)
+data class DeviceLoginCielo(val clientId: String, val accessToken: String, val merchantCode: String)
 
 /**
  * Configuração operacional da unidade. NUNCA remove capacidade do app — o POS

@@ -139,7 +139,7 @@ class AuthRepository @Inject constructor(
             )
         }
 
-        response.cielo?.let { credentialsStore.saveCieloCredentials(it.clientId, it.accessToken) }
+        response.cielo?.let { credentialsStore.saveCieloCredentials(it.clientId, it.accessToken, it.merchantCode) }
             ?: credentialsStore.clearCieloCredentials()
 
         // Permissões do operador: falha aqui NUNCA impede o login. Sem elas o

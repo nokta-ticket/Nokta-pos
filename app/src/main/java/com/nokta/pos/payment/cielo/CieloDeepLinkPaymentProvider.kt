@@ -63,6 +63,7 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
             accessToken = credentials.accessToken,
             clientID = credentials.clientId,
             reference = request.attemptId,
+            merchantCode = credentials.merchantCode,
             installments = request.installments.coerceAtLeast(0).toString(),
             items = listOf(
                 CieloOrderItem(
@@ -150,7 +151,14 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
     }
 }
 
-data class CieloCredentials(val clientId: String, val accessToken: String)
+/**
+ * `clientId`/`accessToken` identificam a NOKTA como integradora perante a
+ * Cielo — globais, os mesmos para qualquer terminal de qualquer cliente.
+ * `merchantCode` (EC) é o que varia por unidade: identifica QUEM recebe o
+ * dinheiro daquela venda. Nunca confundir os dois — ver comentário do model
+ * PaymentAcquirerConfig no backend (nokta-api/prisma/schema.prisma).
+ */
+data class CieloCredentials(val clientId: String, val accessToken: String, val merchantCode: String)
 
 /**
  * As credenciais (Client-ID/Access Token da Cielo) NUNCA vêm hardcoded no

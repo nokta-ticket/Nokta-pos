@@ -356,10 +356,13 @@ class BalcaoViewModel @Inject constructor(
 
     private fun failPayment(message: String) {
         // Nada foi criado no Nokta ainda — o operador pode trocar de método e
-        // tentar de novo sem deixar comanda pela metade.
+        // tentar de novo sem deixar comanda pela metade. Fica na própria tela
+        // de Pagamento (nunca volta pro CART) porque é ela quem sabe exibir
+        // `errorMessage` (PosInlineWarning) — voltar pro carrinho aqui
+        // descartava o aviso sem o operador nunca vê-lo (bug real: um
+        // pagamento recusado/sem credencial Cielo parecia "não fazer nada").
         _state.value = _state.value.copy(
             isProcessing = false,
-            stage = BalcaoStage.CART,
             statusMessage = null,
             errorMessage = message,
         )

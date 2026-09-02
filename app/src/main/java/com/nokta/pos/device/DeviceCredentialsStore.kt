@@ -157,21 +157,35 @@ class DeviceCredentialsStore @Inject constructor(
     fun currentUserRole(): String? = prefs.getString(KEY_USER_ROLE, null)
     fun currentUserName(): String? = prefs.getString(KEY_USER_NAME, null)
 
-    fun saveCieloCredentials(clientId: String, accessToken: String) {
+    /**
+     * `clientId`/`accessToken` são GLOBAIS da Nokta (identificam a Nokta como
+     * integradora perante a Cielo — cadastrados uma vez pelo SUPER_ADMIN no
+     * painel Adquirentes, nunca por organização/unidade) mas chegam aqui do
+     * mesmo jeito, via device-login, porque o app não deve embutir segredo
+     * nenhum no APK. `merchantCode` é o único dado que É por unidade — o EC
+     * que identifica quem recebe o dinheiro daquela venda.
+     */
+    fun saveCieloCredentials(clientId: String, accessToken: String, merchantCode: String) {
         prefs.edit()
             .putString(KEY_CIELO_CLIENT_ID, clientId)
             .putString(KEY_CIELO_ACCESS_TOKEN, accessToken)
+            .putString(KEY_CIELO_MERCHANT_CODE, merchantCode)
             .apply()
     }
 
     fun clearCieloCredentials() {
-        prefs.edit().remove(KEY_CIELO_CLIENT_ID).remove(KEY_CIELO_ACCESS_TOKEN).apply()
+        prefs.edit()
+            .remove(KEY_CIELO_CLIENT_ID)
+            .remove(KEY_CIELO_ACCESS_TOKEN)
+            .remove(KEY_CIELO_MERCHANT_CODE)
+            .apply()
     }
 
     override suspend fun current(): CieloCredentials? {
         val clientId = prefs.getString(KEY_CIELO_CLIENT_ID, null) ?: return null
         val accessToken = prefs.getString(KEY_CIELO_ACCESS_TOKEN, null) ?: return null
-        return CieloCredentials(clientId, accessToken)
+        val merchantCode = prefs.getString(KEY_CIELO_MERCHANT_CODE, null) ?: return null
+        return CieloCredentials(clientId, accessToken, merchantCode)
     }
 
     private companion object {
@@ -192,5 +206,6 @@ class DeviceCredentialsStore @Inject constructor(
         const val KEY_BLOCK_CLOSE_PENDING = "block_close_pending"
         const val KEY_CIELO_CLIENT_ID = "cielo_client_id"
         const val KEY_CIELO_ACCESS_TOKEN = "cielo_access_token"
+        const val KEY_CIELO_MERCHANT_CODE = "cielo_merchant_code"
     }
 }
