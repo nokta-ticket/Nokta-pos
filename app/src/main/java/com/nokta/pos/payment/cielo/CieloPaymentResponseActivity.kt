@@ -62,33 +62,50 @@ class CieloPaymentResponseActivity : ComponentActivity() {
             .getOrElse { return PaymentResult.Failed(attemptId, "Falha ao decodificar resposta da Cielo (Base64 inválido).") }
         val decodedJson = String(decodedBytes, Charsets.UTF_8)
 
-        // A Cielo usa o MESMO formato Base64(JSON) tanto para sucesso quanto
-        // para erro/cancelamento — só o shape do JSON interno muda (payments[]
-        // vs. code/reason). Tenta erro primeiro porque tem menos campos
-        // obrigatórios (mais fácil de descartar por engano se a ordem fosse
-        // invertida).
-        val errorBody = runCatching { json.decodeFromString<CieloErrorBody>(decodedJson) }.getOrNull()
-        if (errorBody != null) {
-            return when (errorBody.code) {
-                CieloErrorCode.CANCELLED_BY_USER -> PaymentResult.Cancelled(attemptId, errorBody.reason)
-                else -> PaymentResult.Declined(attemptId, errorBody.reason)
-            }
-        }
-
-        val successBody = runCatching { json.decodeFromString<CieloPaymentResponseBody>(decodedJson) }.getOrNull()
-            ?: return PaymentResult.Failed(attemptId, "Resposta da Cielo em formato inesperado.")
-
-        val payment = successBody.payments.firstOrNull()
-            ?: return PaymentResult.Failed(attemptId, "Resposta da Cielo sem dados de pagamento.")
-
-        return PaymentResult.Approved(
-            attemptId = attemptId,
-            amount = com.nokta.pos.common.Money(successBody.paidAmount),
-            providerTransactionId = payment.cieloCode ?: successBody.id ?: attemptId,
-            authorizationCode = payment.authCode,
-            brand = payment.brand,
-            maskedCardNumber = payment.mask,
-            installments = payment.installments,
-        )
+        return decodeCieloResponseJson(json, decodedJson, attemptId)
     }
+}
+
+/**
+ * Extraído de [CieloPaymentResponseActivity.decodeResult] para ser
+ * testável sem Android (o único código Android-specific dali é ler o
+ * parâmetro da URI e o Base64.decode). A Cielo usa o MESMO formato
+ * Base64(JSON) tanto para sucesso quanto para erro/cancelamento — só o
+ * shape do JSON interno muda (payments[] vs. code/reason). Tenta erro
+ * primeiro porque tem menos campos obrigatórios (mais fácil de descartar
+ * por engano se a ordem fosse invertida).
+ */
+internal fun decodeCieloResponseJson(json: Json, decodedJson: String, attemptId: String): PaymentResult {
+    val errorBody = runCatching { json.decodeFromString<CieloErrorBody>(decodedJson) }.getOrNull()
+    if (errorBody != null) {
+        return when (errorBody.code) {
+            CieloErrorCode.CANCELLED_BY_USER -> PaymentResult.Cancelled(attemptId, errorBody.reason)
+            else -> PaymentResult.Declined(attemptId, errorBody.reason)
+        }
+    }
+
+    val successBody = runCatching { json.decodeFromString<CieloPaymentResponseBody>(decodedJson) }.getOrNull()
+        ?: return PaymentResult.Failed(attemptId, "Resposta da Cielo em formato inesperado.")
+
+    val payment = successBody.payments.firstOrNull()
+        ?: return PaymentResult.Failed(attemptId, "Resposta da Cielo sem dados de pagamento.")
+
+    // `paidAmount` (nível topo do JSON) e `payments[0].amount` deveriam
+    // trazer o mesmo valor, mas o LIO Emulator observado (1.61.9) sempre
+    // manda paidAmount=0 mesmo com o pagamento aprovado de verdade — o
+    // valor real só vem em payments[0].amount. Preferir sempre o valor
+    // da transação individual (é o que a Cielo de fato capturou do
+    // cartão); paidAmount só entra como fallback se, por algum motivo,
+    // o valor do pagamento em si vier zerado/ausente.
+    val approvedAmountCents = payment.amount.takeIf { it > 0 } ?: successBody.paidAmount
+
+    return PaymentResult.Approved(
+        attemptId = attemptId,
+        amount = com.nokta.pos.common.Money(approvedAmountCents),
+        providerTransactionId = payment.cieloCode ?: successBody.id ?: attemptId,
+        authorizationCode = payment.authCode,
+        brand = payment.brand,
+        maskedCardNumber = payment.mask,
+        installments = payment.installments,
+    )
 }
