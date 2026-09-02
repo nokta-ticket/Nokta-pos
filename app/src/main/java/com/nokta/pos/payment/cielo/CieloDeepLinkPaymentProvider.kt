@@ -20,6 +20,20 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * Json.Default omite qualquer campo cujo valor bate com o default declarado
+ * na data class (ex.: CieloOrderItem.unitOfMeasure = "unidade") — o app
+ * Cielo, do outro lado, desserializa pra uma classe SEM default nesse
+ * parâmetro, então "campo ausente no JSON" vira
+ * "Parameter specified as non-null is null: ... unitOfMeasure" mesmo com o
+ * valor certo já presente no código Kotlin (reproduzido no LIO Emulator
+ * 1.61.9). `internal` (não private) para o teste de serialização exercitar
+ * exatamente a instância usada em produção. Só o payload de SAÍDA pra Cielo
+ * usa isto — decodificar a resposta dela (CieloPaymentResponseBody/
+ * CieloPaymentErrorBody) continua no Json.Default de sempre.
+ */
+internal val cieloRequestJson = Json { encodeDefaults = true }
+
+/**
  * Único ponto do app que fala com o app Cielo Smart via deep link (Intent).
  * Todo o resto do app (Checkout, ViewModels) conhece só a interface
  * PaymentProvider — trocar de adquirente no futuro nunca toca fora deste
@@ -78,7 +92,7 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
         )
 
         val encoded = Base64.encodeToString(
-            Json.encodeToString(body).toByteArray(Charsets.UTF_8),
+            cieloRequestJson.encodeToString(body).toByteArray(Charsets.UTF_8),
             Base64.NO_WRAP,
         )
         val uri = Uri.parse("lio://payment?request=$encoded&urlCallback=order://response")
