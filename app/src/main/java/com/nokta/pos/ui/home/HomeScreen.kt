@@ -3,40 +3,55 @@ package com.nokta.pos.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PointOfSale
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Receipt
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.TableRestaurant
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -45,24 +60,42 @@ import com.nokta.pos.common.Money
 import com.nokta.pos.ui.components.NoktaFooter
 import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosInlineWarning
-import com.nokta.pos.ui.theme.*
 
-/**
- * Fonte monoespaçada para rótulos "técnicos" (unidade, seção, status) do
- * redesign 2026-09 — mesma linguagem visual de um terminal de pagamento.
- * Usa a mono do sistema; nunca foi empacotada uma fonte própria.
- */
-private val MonoFamily = FontFamily.Monospace
+/* =========================================================================
+ *  HOME DO POS — versão técnica/quadrada (redesign 2026-09, fiel ao arquivo
+ *  de referência enviado pelo usuário). Cantos retos, rótulos em caixa alta
+ *  espaçada e azul como cor de ação.
+ *
+ *  Esta tela é só o INVÓLUCRO VISUAL — ver [HomeScreen] para o ponto que
+ *  carrega o ViewModel de verdade e [HomeContent] para a composição
+ *  conectada a [HomeUiState]/callbacks reais. Toda a lógica (permissões,
+ *  sync, caixa, diálogos) é a mesma de antes; só a apresentação mudou.
+ * ========================================================================= */
+
+private object Dim {
+    val ScreenPad = 20.dp
+    val BoxRadius = 5.dp
+    val PillHeight = 30.dp
+    val HeaderButton = 40.dp
+    val QuickCardHeight = 128.dp
+    val OpCardHeight = 182.dp
+    val RowHeight = 58.dp
+}
+
+private val Blue = Color(0xFF0B57F0)
+private val Ink = Color(0xFF11141A)
+private val InkSoft = Color(0xFF3A4048)
+private val Gray = Color(0xFF6E7681)
+private val GrayLight = Color(0xFF9AA1AA)
+private val GhostText = Color(0xFFC3C9D1)
+private val Line = Color(0xFFE3E7EC)
+private val PanelBg = Color(0xFFF4F7FB)
+private val GreenDot = Color(0xFF16A34A)
+private val Surface = Color(0xFFFFFFFF)
 
 /**
  * Home operacional. Só ações — nada de faturamento, gráficos ou indicadores
  * gerenciais (isso é o dashboard, não o POS).
- *
- * A composição segue o design aprovado: cabeçalho enxuto, status discreto,
- * "Nova venda" como bloco de marca em gradiente, e as duas consultas (Mesas /
- * Comandas) lado a lado. Todos os caminhos aparecem sempre em qualquer modo de
- * operação — um bar que trabalha por mesa ainda vende no balcão; o modo só
- * decide a ORDEM das duas ações secundárias.
  *
  * Ações sem permissão ficam esmaecidas e inertes, com o motivo à vista, em vez
  * de sumirem (o operador perguntaria "cadê?") ou de deixarem tocar e tomar 403.
@@ -159,34 +192,27 @@ fun HomeContent(
         }
     }
 
-    // Sem scroll de propósito: tudo (incluindo o rodapé) precisa caber na
-    // tela inicial de uma vez. O bloco de conteúdo usa `weight(1f)` para
-    // consumir o espaço sobrando e o rodapé fica sempre ancorado embaixo,
-    // nunca abaixo de uma dobra.
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
-                .background(NoktaBackground),
+                .background(Surface)
+                .verticalScroll(rememberScrollState()),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 24.dp, bottom = 20.dp),
-            ) {
+            Column(Modifier.padding(horizontal = Dim.ScreenPad)) {
+
+                Spacer(Modifier.height(22.dp))
+
                 Header(
                     userName = state.operatorName ?: "operador",
                     unitName = state.locationName,
-                    onLogout = onLogout,
                     showCashBell = state.requiresCashSession,
                     cashWarningActive = state.hasCashWarning,
                     onCashBellClick = onOpenCashWarning,
+                    onLogout = onLogout,
                 )
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(18.dp))
 
                 StatusRow(state = state)
 
@@ -197,58 +223,76 @@ fun HomeContent(
                     )
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(16.dp))
 
-                NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
+                QuickSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
 
                 Spacer(Modifier.height(24.dp))
 
                 SectionLabel("OPERAÇÕES")
 
-                val tables: @Composable RowScope.() -> Unit = {
-                    BigActionCard(
-                        modifier = Modifier.weight(1f),
+                Spacer(Modifier.height(10.dp))
+
+                val tables: @Composable () -> OperationCardSpec = {
+                    OperationCardSpec(
                         index = "01",
                         icon = Icons.Outlined.TableRestaurant,
                         title = "Mesas",
-                        subtitle = "Consumo e\nlançamento de itens",
+                        subtitle = "Consumo e lançamento de itens",
                         enabled = access.canViewTables,
                         onClick = onMesas,
                     )
                 }
-                val tabs: @Composable RowScope.() -> Unit = {
-                    BigActionCard(
-                        modifier = Modifier.weight(1f),
+                val tabs: @Composable () -> OperationCardSpec = {
+                    OperationCardSpec(
                         index = "02",
-                        icon = Icons.Outlined.ReceiptLong,
+                        icon = Icons.Outlined.Receipt,
                         title = "Comandas",
-                        subtitle = "Por pulseira\nou cartão",
+                        subtitle = "Por pulseira ou cartão",
                         enabled = access.canViewTabs,
                         onClick = onComandas,
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
-                    // Balcão puro: comanda antes de mesa (mesa quase não é usada).
-                    if (state.highlightTables) { tables(); tabs() } else { tabs(); tables() }
+                // Balcão puro: comanda antes de mesa (mesa quase não é usada).
+                val (first, second) = if (state.highlightTables) tables() to tabs() else tabs() to tables()
+
+                Row(Modifier.height(IntrinsicSize.Min)) {
+                    OperationCard(spec = first, modifier = Modifier.weight(1f))
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .fillMaxHeight()
+                            .background(Line),
+                    )
+                    OperationCard(spec = second, modifier = Modifier.weight(1f))
                 }
 
                 if (access.canViewTabs) {
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(26.dp))
                     SectionLabel("REGISTROS")
-                    RegistrosList(
-                        openTabsCount = state.openTabsCount,
-                        onOpenTabs = onAbertas,
-                        onHistory = onHistorico,
+                    Spacer(Modifier.height(6.dp))
+                    RecordRow(
+                        icon = Icons.Outlined.MenuBook,
+                        title = "Abertas",
+                        subtitle = when (state.openTabsCount) {
+                            null -> "Mesas e comandas abertas"
+                            0 -> "Nada em aberto"
+                            else -> "Mesas e comandas abertas"
+                        },
+                        badgeCount = state.openTabsCount?.takeIf { it > 0 },
+                        onClick = onAbertas,
+                    )
+                    RecordRow(
+                        icon = Icons.Outlined.Schedule,
+                        title = "Histórico",
+                        subtitle = "Ver vendas encerradas",
+                        badgeCount = null,
+                        onClick = onHistorico,
                     )
                 }
 
-                // Espaço flexível reduzido: o respiro entre os blocos acima já
-                // foi aumentado para usar melhor a altura da tela, então o vão
-                // antes da assinatura não precisa mais concentrar tanto vazio
-                // sozinho. min menor (16dp) porque telas curtas já ganham mais
-                // respiro dos Spacers fixos de cima.
-                Spacer(Modifier.heightIn(min = 16.dp).weight(1f))
+                Spacer(Modifier.height(30.dp))
             }
 
             // Fora do padding horizontal da coluna acima de propósito: o
@@ -303,22 +347,24 @@ fun HomeContent(
     }
 }
 
+/* ------------------------------ Diálogos ----------------------------- */
+
 /** Toast auto-dispensável (chamador cuida do timer) com botão de fechar manual. */
 @Composable
 private fun CashClosedToast(modifier: Modifier = Modifier, onDismiss: () -> Unit) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(WarningAmberLight)
-            .border(1.dp, WarningAmber.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(Dim.BoxRadius))
+            .background(Color(0xFFFDF3E3))
+            .border(1.dp, Color(0xFFB45309).copy(alpha = 0.25f), RoundedCornerShape(Dim.BoxRadius))
             .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "Caixa fechado nesta unidade. Toque no sino para saber mais.",
             style = MaterialTheme.typography.bodyMedium,
-            color = WarningAmber,
+            color = Color(0xFFB45309),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
@@ -326,7 +372,7 @@ private fun CashClosedToast(modifier: Modifier = Modifier, onDismiss: () -> Unit
             text = "×",
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
-            color = WarningAmber,
+            color = Color(0xFFB45309),
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(onClick = onDismiss)
@@ -413,450 +459,6 @@ private fun LogoutConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Uni
     )
 }
 
-/* ------------------------------ Header ------------------------------ */
-
-/**
- * O nome do operador é o único texto forte aqui; a unidade é contexto. O papel
- * (WAITER/CASHIER) não aparece: é informação administrativa que não muda nada
- * no que o operador faz nesta tela.
- *
- * Redesign 2026-09: tiles quadrados de ícone (sino + sair) no lugar dos pills
- * antigos, e a unidade vira um rótulo mono/uppercase em azul — mesma
- * linguagem visual "instrumento" do restante da tela nova.
- */
-@Composable
-private fun Header(
-    userName: String,
-    unitName: String?,
-    onLogout: () -> Unit,
-    showCashBell: Boolean = false,
-    cashWarningActive: Boolean = false,
-    onCashBellClick: () -> Unit = {},
-) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Olá, $userName",
-                modifier = Modifier.weight(1f),
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp,
-                color = NoktaInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (showCashBell) {
-                    IconTile(
-                        icon = Icons.Filled.Notifications,
-                        badge = cashWarningActive,
-                        contentDescription = if (cashWarningActive) "Avisos (caixa fechado)" else "Avisos",
-                        onClick = onCashBellClick,
-                    )
-                }
-                IconTile(
-                    icon = Icons.AutoMirrored.Filled.Logout,
-                    contentDescription = "Sair",
-                    onClick = onLogout,
-                )
-            }
-        }
-
-        // A unidade ocupa uma linha própria, com a largura inteira: ao lado do
-        // botão "Sair" ela perdia ~72dp e um nome comum de rede ("Nokta Bar ·
-        // Unidade Barra da Tijuca") era abreviado sem necessidade. Sobra
-        // espaço vertical de sobra nesta tela; largura é que era escassa.
-        unitName?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                text = it.uppercase(),
-                fontFamily = MonoFamily,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 2.sp,
-                lineHeight = 15.sp,
-                color = NoktaPurple,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    }
-}
-
-/**
- * Tile quadrado de ícone — usado tanto para o sino de avisos quanto para
- * "Sair". Fiel ao mockup: só borda fina (sem fundo/clip próprio), badge
- * ciano fixo (não muda de cor por estado) quando há algo pendente.
- */
-@Composable
-private fun IconTile(
-    icon: ImageVector,
-    contentDescription: String?,
-    badge: Boolean = false,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .border(1.dp, NoktaInk.copy(alpha = 0.14f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = NoktaInk,
-            modifier = Modifier.size(15.dp),
-        )
-        if (badge) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 3.dp, y = (-3).dp)
-                    .size(7.dp)
-                    .background(NoktaAccentBlue, RoundedCornerShape(50)),
-            )
-        }
-    }
-}
-
-/* ---------------------------- Status row ---------------------------- */
-
-/**
- * Conexão, sincronização e caixa — deliberadamente discreto. O operador
- * precisa saber que a máquina está funcionando, mas isso nunca pode competir
- * com "Nova venda".
- *
- * Redesign 2026-09: chips lado a lado (estilo mockup) em vez de pill +
- * detalhe à direita. Mesma fonte de estado de sempre (fila de sincronização,
- * não ping de rede) — só a apresentação mudou. O chip de caixa é novo:
- * usa [HomeUiState.isCashOpen] (já carregado por HomeViewModel.loadCashStatus)
- * e só aparece quando a unidade exige caixa aberto para pagar
- * ([HomeUiState.requiresCashSession]) — sem isso, `isCashOpen` fica sempre
- * `null` e não há nada de útil para mostrar (nunca escrito como "fechado" por
- * engano).
- */
-@Composable
-private fun StatusRow(state: HomeUiState) {
-    val connection = state.connection
-
-    val dotColor = when (connection) {
-        ConnectionState.ONLINE -> NoktaOnline
-        ConnectionState.SYNCING -> NoktaAccentBlue
-        ConnectionState.PENDING -> WarningAmber
-        ConnectionState.OFFLINE -> AlertRed
-        ConnectionState.OFFLINE_PENDING -> AlertRed
-    }
-
-    val statusLabel = when (connection) {
-        ConnectionState.ONLINE -> "ONLINE"
-        ConnectionState.SYNCING -> "SINCRONIZANDO"
-        ConnectionState.PENDING -> "PENDENTE"
-        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> "OFFLINE"
-    }
-
-    val pending = state.pendingSyncCount
-    val syncLabel = when (connection) {
-        ConnectionState.ONLINE -> "SYNC · AGORA"
-        ConnectionState.SYNCING -> "SYNC · ENVIANDO"
-        ConnectionState.PENDING -> "SYNC · $pending NA FILA"
-        // Sem fila, o operador ainda precisa saber que está sem rede — a
-        // mensagem foca só nisso, sem misturar com "última sincronização"
-        // (as duas ideias juntas soam contraditórias: "sem conexão —
-        // sincronizado agora").
-        ConnectionState.OFFLINE -> "SYNC · SEM REDE"
-        // Com fila, o risco real é desligar o terminal com venda presa nele.
-        // "Operações", não "vendas": uma única venda pode gerar várias
-        // entradas na fila (abrir comanda, lançar pedido, registrar
-        // pagamento, fechar) — contar isso como "vendas" engana o operador
-        // sobre quantas vendas de fato ficaram presas.
-        ConnectionState.OFFLINE_PENDING -> "SYNC · $pending PENDENTE"
-    }
-
-    // Só os estados que exigem atenção puxam cor; os demais ficam cinza para
-    // não competir com a ação principal.
-    val syncColor = when (connection) {
-        ConnectionState.PENDING -> WarningAmber
-        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> AlertRed
-        else -> NoktaMutedSoft
-    }
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        StatusChip(label = statusLabel, textColor = NoktaInk, dotColor = dotColor)
-        StatusChip(label = syncLabel, textColor = syncColor, icon = Icons.Filled.Sync)
-
-        state.isCashOpen?.takeIf { state.requiresCashSession }?.let { cashOpen ->
-            StatusChip(
-                label = if (cashOpen) "CAIXA ABERTO" else "CAIXA FECHADO",
-                textColor = Color.White,
-                bg = if (cashOpen) NoktaPurple else AlertRed,
-                icon = Icons.Filled.PointOfSale,
-            )
-        }
-    }
-}
-
-/** Chip de status: borda fina por padrão, ou preenchido quando [bg] é passado (ex.: "CAIXA ABERTO"). */
-@Composable
-private fun StatusChip(
-    label: String,
-    textColor: Color,
-    bg: Color = Color.Transparent,
-    dotColor: Color? = null,
-    icon: ImageVector? = null,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        modifier = Modifier
-            .then(if (bg == Color.Transparent) Modifier.border(1.dp, NoktaInk.copy(alpha = 0.12f)) else Modifier)
-            .background(bg)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        dotColor?.let {
-            Box(modifier = Modifier.size(6.dp).background(it, RoundedCornerShape(50)))
-        }
-        icon?.let {
-            Icon(it, contentDescription = null, tint = textColor, modifier = Modifier.size(10.dp))
-        }
-        Text(label, fontFamily = MonoFamily, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = textColor)
-    }
-}
-
-/**
- * "há 2 min", "há 1 h", "ontem". Precisão fina não ajuda o operador — o que
- * ele decide com isso é se pode fechar o turno, então a ordem de grandeza
- * basta.
- */
-private fun relativeSince(epochMs: Long): String {
-    val minutes = ((System.currentTimeMillis() - epochMs) / 60_000).coerceAtLeast(0)
-    return when {
-        minutes < 1 -> "agora"
-        minutes < 60 -> "há $minutes min"
-        minutes < 60 * 24 -> "há ${minutes / 60} h"
-        else -> "há ${minutes / (60 * 24)} d"
-    }
-}
-
-/* --------------------------- Nova venda ----------------------------- */
-
-/**
- * A ação dominante. Redesign 2026-09: bloco flat (Electric Blue chapado, sem
- * gradiente) com o canto inferior-esquerdo recortado — é o único elemento
- * "de marca" fora do padrão retangular da tela, o que basta para vencer sem
- * precisar de gradiente/glow.
- */
-@Composable
-private fun NewSaleCard(enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(notchedCornerShape(24.dp))
-            .background(NoktaPurple)
-            .clickable(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.5f)
-            .padding(22.dp),
-    ) {
-        Column {
-            Text(
-                text = "AÇÃO RÁPIDA",
-                fontFamily = MonoFamily,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
-                color = Color.White.copy(alpha = 0.65f),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column {
-                    Text("Nova venda", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                    Text("Balcão · cobrar na hora", fontSize = 13.5.sp, color = Color.White.copy(alpha = 0.75f))
-                }
-                Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White)
-            }
-        }
-    }
-}
-
-/**
- * Recorte de canto: topo e direita retos, o canto inferior-esquerdo é
- * cortado em diagonal por [notch]. Assinatura visual do redesign 2026-09
- * (card de "Nova venda"), no lugar do card 100% arredondado anterior.
- *
- * `Shape` (não `GenericShape`) porque `createOutline` recebe [Density] como
- * parâmetro nomeado de verdade — evita depender da assinatura pouco óbvia
- * do lambda de `GenericShape` (size, LayoutDirection), que não tem acesso a
- * densidade nenhuma.
- */
-private fun notchedCornerShape(notch: Dp): Shape = object : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val n = with(density) { notch.toPx() }
-        val path = Path().apply {
-            moveTo(0f, 0f)
-            lineTo(size.width, 0f)
-            lineTo(size.width, size.height)
-            lineTo(n, size.height)
-            lineTo(0f, size.height - n)
-            close()
-        }
-        return Outline.Generic(path)
-    }
-}
-
-/** Rótulo de seção mono/uppercase — "OPERAÇÕES", "REGISTROS". */
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        fontFamily = MonoFamily,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 2.sp,
-        color = NoktaInk.copy(alpha = 0.35f),
-        modifier = Modifier.padding(bottom = 12.dp),
-    )
-}
-
-/* -------------------------- Cards grandes --------------------------- */
-
-/**
- * Redesign 2026-09: fundo Ice flat (sem borda/sombra), índice numerado no
- * canto ("01", "02") e call-to-action mono "ABRIR →" no lugar do chevron —
- * mesma linguagem "instrumento técnico" do resto da tela.
- */
-@Composable
-private fun BigActionCard(
-    modifier: Modifier = Modifier,
-    index: String,
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = modifier
-            .heightIn(min = 150.dp)
-            .background(Color(0xFFF4F7FB))
-            .border(1.dp, NoktaInk.copy(alpha = 0.1f))
-            .clickable(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.5f)
-            .padding(16.dp),
-    ) {
-        Text(
-            index,
-            fontFamily = MonoFamily,
-            fontSize = 10.sp,
-            color = NoktaInk.copy(alpha = 0.25f),
-            modifier = Modifier.align(Alignment.TopEnd),
-        )
-        Column(Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .border(1.dp, NoktaPurple.copy(alpha = 0.5f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(15.dp))
-            }
-            Spacer(Modifier.height(14.dp))
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
-            Spacer(Modifier.height(5.dp))
-            Text(subtitle, fontSize = 12.5.sp, lineHeight = 17.sp, color = NoktaMuted, modifier = Modifier.weight(1f))
-            Text("ABRIR →", fontFamily = MonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NoktaPurple)
-        }
-    }
-}
-
-/* ------------------------ Atalhos inferiores ------------------------ */
-
-/**
- * Lista "REGISTROS": o que segue aberto e o que já foi fechado. Redesign
- * 2026-09: linhas com divisor fino no lugar do card com divisória central —
- * mesmo peso visual secundário de antes (é consulta de apoio, não caminho de
- * venda). A contagem de abertas some enquanto carrega (ou se a chamada
- * falhar): um número errado sobre quantas mesas estão em aberto é pior do
- * que número nenhum.
- */
-@Composable
-private fun RegistrosList(
-    openTabsCount: Int?,
-    onOpenTabs: () -> Unit,
-    onHistory: () -> Unit,
-) {
-    Column {
-        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
-        RegistroRow(
-            title = "Abertas",
-            description = when (openTabsCount) {
-                null -> "Mesas e comandas abertas"
-                0 -> "Nada em aberto"
-                else -> "Mesas e comandas abertas"
-            },
-            badgeCount = openTabsCount?.takeIf { it > 0 },
-            onClick = onOpenTabs,
-        )
-        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
-        RegistroRow(
-            title = "Histórico",
-            description = "Ver vendas encerradas",
-            badgeCount = null,
-            onClick = onHistory,
-        )
-        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
-    }
-}
-
-@Composable
-private fun RegistroRow(
-    title: String,
-    description: String,
-    badgeCount: Int?,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 16.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("»", color = NoktaPurple, fontFamily = MonoFamily, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
-                    badgeCount?.let {
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(21.dp)
-                                .clip(CircleShape)
-                                .background(NoktaPurple),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(it.toString(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    }
-                }
-                Text(description, fontSize = 12.sp, color = NoktaMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        Icon(Icons.Filled.History, contentDescription = null, tint = NoktaMutedSoft, modifier = Modifier.size(14.dp))
-    }
-}
-
-/* ------------------------------ Diálogo ----------------------------- */
-
 /**
  * Um pagamento Cielo sem resultado confirmado trava a operação de propósito:
  * cobrar de novo sem checar o extrato pode cobrar o cliente duas vezes.
@@ -881,4 +483,436 @@ private fun PendingPaymentDialog(
         confirmButton = { TextButton(onClick = onOpenTab) { Text("Abrir comanda") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Já verifiquei") } },
     )
+}
+
+/* --------------------------- Header / status ------------------------ */
+
+/**
+ * O nome do operador é o único texto forte aqui; a unidade é contexto.
+ * Fiel ao layout de referência: botões quadrados de borda fina, sino com
+ * badge azul quando há aviso de caixa pendente.
+ */
+@Composable
+private fun Header(
+    userName: String,
+    unitName: String?,
+    showCashBell: Boolean,
+    cashWarningActive: Boolean,
+    onCashBellClick: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Olá, $userName",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp,
+                color = Ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(7.dp))
+            unitName?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it.uppercase(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                    color = Blue,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (showCashBell) {
+            Box {
+                SquareIconButton(
+                    icon = Icons.Outlined.Notifications,
+                    contentDescription = if (cashWarningActive) "Avisos (caixa fechado)" else "Avisos",
+                    onClick = onCashBellClick,
+                )
+                if (cashWarningActive) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 2.dp, end = 2.dp)
+                            .size(6.dp)
+                            .background(Blue),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+        }
+
+        SquareIconButton(
+            icon = Icons.AutoMirrored.Outlined.Logout,
+            contentDescription = "Sair",
+            onClick = onLogout,
+        )
+    }
+}
+
+@Composable
+private fun SquareIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(Dim.HeaderButton)
+            .clip(RoundedCornerShape(Dim.BoxRadius))
+            .background(Surface)
+            .border(1.dp, Line, RoundedCornerShape(Dim.BoxRadius))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Ink,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+/* ---------------------------- Status row ---------------------------- */
+
+/**
+ * Conexão, sincronização e caixa — deliberadamente discreto. Mesma fonte de
+ * estado de sempre (fila de sincronização, não ping de rede); só a
+ * apresentação (pills) mudou. O pill de caixa só aparece quando a unidade
+ * exige caixa aberto para pagar ([HomeUiState.requiresCashSession]).
+ */
+@Composable
+private fun StatusRow(state: HomeUiState) {
+    val connection = state.connection
+
+    val isOnlineLike = connection != ConnectionState.OFFLINE && connection != ConnectionState.OFFLINE_PENDING
+
+    val statusLabel = when (connection) {
+        ConnectionState.ONLINE -> "ONLINE"
+        ConnectionState.SYNCING -> "SINCRONIZANDO"
+        ConnectionState.PENDING -> "PENDENTE"
+        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> "OFFLINE"
+    }
+
+    val pending = state.pendingSyncCount
+    val syncLabel = when (connection) {
+        ConnectionState.ONLINE -> "SYNC · AGORA"
+        ConnectionState.SYNCING -> "SYNC · ENVIANDO"
+        ConnectionState.PENDING -> "SYNC · $pending NA FILA"
+        // Sem fila, o operador ainda precisa saber que está sem rede — a
+        // mensagem foca só nisso, sem misturar com "última sincronização".
+        ConnectionState.OFFLINE -> "SYNC · SEM REDE"
+        // Com fila, o risco real é desligar o terminal com venda presa nele.
+        ConnectionState.OFFLINE_PENDING -> "SYNC · $pending PENDENTE"
+    }
+
+    val syncColor = when (connection) {
+        ConnectionState.PENDING -> Color(0xFFB45309)
+        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> Color(0xFFD92D20)
+        else -> Gray
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusPill(
+            label = statusLabel,
+            leading = {
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .background(if (isOnlineLike) GreenDot else Color(0xFFD92D20)),
+                )
+            },
+        )
+        StatusPill(
+            label = syncLabel,
+            textColor = syncColor,
+            leading = {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = null,
+                    tint = syncColor,
+                    modifier = Modifier.size(12.dp),
+                )
+            },
+        )
+        state.isCashOpen?.takeIf { state.requiresCashSession }?.let { cashOpen ->
+            StatusPill(
+                label = if (cashOpen) "CAIXA ABERTO" else "CAIXA FECHADO",
+                filled = true,
+                filledBg = if (cashOpen) Blue else Color(0xFFD92D20),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(
+    label: String,
+    filled: Boolean = false,
+    filledBg: Color = Blue,
+    textColor: Color = Ink,
+    leading: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .height(Dim.PillHeight)
+            .clip(RoundedCornerShape(Dim.BoxRadius))
+            .background(if (filled) filledBg else Surface)
+            .then(
+                if (filled) Modifier
+                else Modifier.border(1.dp, Line, RoundedCornerShape(Dim.BoxRadius)),
+            )
+            .padding(horizontal = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(7.dp))
+        }
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = if (filled) Color.White else textColor,
+            maxLines = 1,
+        )
+    }
+}
+
+/* ----------------------------- Nova venda --------------------------- */
+
+@Composable
+private fun QuickSaleCard(enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(Dim.QuickCardHeight)
+            .clip(CutCornerShape(bottomStart = 20.dp))
+            .background(Blue)
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.5f),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.ShoppingCart,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.10f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 8.dp)
+                .size(140.dp),
+        )
+
+        Column(
+            Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 20.dp, end = 88.dp),
+        ) {
+            Text(
+                text = "AÇÃO RÁPIDA",
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                color = Color.White.copy(alpha = 0.72f),
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "Nova venda",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = Color.White,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Balcão · cobrar na hora",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.85f),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 20.dp)
+                .size(42.dp)
+                .border(1.5.dp, Color.White, RoundedCornerShape(Dim.BoxRadius)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+    }
+}
+
+/* ---------------------------- Operações ----------------------------- */
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 2.sp,
+        color = GrayLight,
+    )
+}
+
+private data class OperationCardSpec(
+    val index: String,
+    val icon: ImageVector,
+    val title: String,
+    val subtitle: String,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun OperationCard(spec: OperationCardSpec, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .height(Dim.OpCardHeight)
+            .background(PanelBg)
+            .clickable(enabled = spec.enabled, onClick = spec.onClick)
+            .alpha(if (spec.enabled) 1f else 0.5f)
+            .padding(16.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(Dim.BoxRadius))
+                    .background(Surface)
+                    .border(1.dp, Line, RoundedCornerShape(Dim.BoxRadius)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = spec.icon,
+                    contentDescription = null,
+                    tint = Blue,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = spec.index,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = GhostText,
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        Text(
+            text = spec.title,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp,
+            color = Ink,
+        )
+
+        Spacer(Modifier.height(6.dp))
+
+        Text(
+            text = spec.subtitle,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp,
+            color = Gray,
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "ABRIR",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp,
+                color = Blue,
+            )
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                contentDescription = null,
+                tint = Blue,
+                modifier = Modifier.size(13.dp),
+            )
+        }
+    }
+}
+
+/* ----------------------------- Registros ---------------------------- */
+
+@Composable
+private fun RecordRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    badgeCount: Int?,
+    onClick: () -> Unit,
+) {
+    Column {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Line),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Dim.RowHeight)
+                .clickable(onClick = onClick),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Blue,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp,
+                        color = Ink,
+                    )
+                    badgeCount?.let {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(19.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Blue),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(it.toString(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, fontSize = 12.sp, color = Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                contentDescription = null,
+                tint = GrayLight,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
 }
