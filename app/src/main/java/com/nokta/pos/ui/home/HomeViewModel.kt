@@ -213,6 +213,7 @@ class HomeViewModel @Inject constructor(
         loadOpenTabsCount()
         refreshOpenTabs()
         loadCashStatus()
+        pollCashStatus()
         warmUpMenuCache()
     }
 
@@ -230,6 +231,27 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             val isOpen = tabRepository.isCashOpen(organizationId, locationId)
             _state.value = _state.value.copy(isCashOpen = isOpen)
+        }
+    }
+
+    /**
+     * O caixa é aberto/fechado no painel/dashboard, fora do POS — só
+     * rechecar em [refresh] (chamado ao voltar pra Home, ver
+     * HomeScreen.OnResumeEffect) não bastava: um operador que ABRE o caixa
+     * pelo painel enquanto o celular fica parado na própria Home (nunca sai
+     * dela) não dispara nenhum ON_RESUME, e o chip continuava "CAIXA
+     * FECHADO" indefinidamente até ele navegar para qualquer outra tela e
+     * voltar. Loop de 20s (mesmo intervalo do heartbeat de terminal do
+     * nokta-pos) mantém o chip correto mesmo sem nenhuma navegação —
+     * inofensivo quando a unidade não exige caixa aberto para pagar
+     * (loadCashStatus() retorna sem chamar rede nesse caso).
+     */
+    private fun pollCashStatus() {
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(20_000)
+                loadCashStatus()
+            }
         }
     }
 
