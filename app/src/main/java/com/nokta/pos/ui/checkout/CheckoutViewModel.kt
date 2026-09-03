@@ -39,6 +39,15 @@ data class CheckoutUiState(
     val installments: Int = 1,
     val amountMode: AmountMode = AmountMode.FULL,
     val splitPeople: Int = 2,
+    /**
+     * Sobrescreve a divisão igualitária SÓ para a cobrança da vez, quando o
+     * operador escolhe "Editar valor" no card de divisão (ex.: um cliente
+     * quer pagar R$ 20 e o outro os R$ 2 restantes, em vez de 50/50). Nunca
+     * persiste entre pessoas: cada nova parte volta a sugerir a divisão
+     * igual do que ainda resta — ver [setSplitPeople]/[register], que sempre
+     * zeram este campo.
+     */
+    val manualSplitAmountCents: Long? = null,
     val receivedCents: Long? = null,
     val isProcessingPayment: Boolean = false,
     val paymentMessage: String? = null,
@@ -73,7 +82,14 @@ data class CheckoutUiState(
             val remaining = tab?.remainingWithPending ?: Money.ZERO
             return when (amountMode) {
                 AmountMode.FULL -> remaining
-                AmountMode.SPLIT -> SplitCalculator.splitRemaining(remaining, splitPeople).firstOrNull() ?: Money.ZERO
+                // manualSplitAmountCents (ver doc do campo) sobrescreve a
+                // sugestão igualitária só para a cobrança da vez — ex.: uma
+                // pessoa paga R$ 20 e a outra os R$ 2 restantes, em vez de
+                // forçar 50/50. validatePartial (usado em `validation`
+                // abaixo) já rejeita um valor manual acima do saldo, então
+                // não precisa de clamp aqui.
+                AmountMode.SPLIT -> manualSplitAmountCents?.let(::Money)
+                    ?: SplitCalculator.splitRemaining(remaining, splitPeople).firstOrNull() ?: Money.ZERO
             }
         }
 
@@ -214,11 +230,19 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun setAmountMode(mode: AmountMode) {
-        _state.value = _state.value.copy(amountMode = mode, receivedCents = null)
+        _state.value = _state.value.copy(amountMode = mode, receivedCents = null, manualSplitAmountCents = null)
     }
 
     fun setSplitPeople(people: Int) {
-        _state.value = _state.value.copy(splitPeople = people.coerceIn(2, 20), receivedCents = null)
+        // Mudar o número de pessoas invalida qualquer valor manual já
+        // digitado para a divisão anterior — volta a sugerir igual, como se
+        // o operador tivesse acabado de entrar no modo Dividir.
+        _state.value = _state.value.copy(splitPeople = people.coerceIn(2, 20), receivedCents = null, manualSplitAmountCents = null)
+    }
+
+    /** "Editar valor" no card de divisão: sobrescreve a parte da vez com um valor digitado pelo operador. */
+    fun setManualSplitAmount(cents: Long) {
+        _state.value = _state.value.copy(manualSplitAmountCents = cents, receivedCents = null)
     }
 
     fun setReceived(cents: Long?) { _state.value = _state.value.copy(receivedCents = cents) }
@@ -399,7 +423,12 @@ class CheckoutViewModel @Inject constructor(
                 receivedCents = null,
                 // Depois de um pagamento parcial, o padrão volta a ser "tudo
                 // que falta" — normalmente a próxima pessoa paga o resto.
+                // manualSplitAmountCents zerado junto: se o operador voltar
+                // pra Dividir para a próxima pessoa, a sugestão volta a ser
+                // igualitária sobre o que ainda resta, não o valor manual da
+                // pessoa anterior.
                 amountMode = AmountMode.FULL,
+                manualSplitAmountCents = null,
                 paymentMessage = when {
                     updated.isFullyPaid -> "Conta quitada."
                     updated.isSettledLocally -> "Pagamento registrado. Sincronizando os últimos itens antes de fechar."

@@ -179,7 +179,11 @@ private fun CheckoutContent(state: CheckoutUiState, viewModel: CheckoutViewModel
             AnimatedVisibility(visible = state.amountMode == AmountMode.SPLIT) {
                 Column {
                     Spacer(Modifier.height(14.dp))
-                    SplitCard(state = state, onSetPeople = viewModel::setSplitPeople)
+                    SplitCard(
+                        state = state,
+                        onSetPeople = viewModel::setSplitPeople,
+                        onSetManualAmount = viewModel::setManualSplitAmount,
+                    )
                 }
             }
 
@@ -547,14 +551,24 @@ private fun AmountField(amount: Money) {
     }
 }
 
-/** Contador de pessoas + card roxo grande com o valor da parte atual e progresso. */
+/**
+ * Contador de pessoas + card com o valor da parte atual e progresso.
+ *
+ * "Editar valor" sobrescreve a sugestão igualitária só para a cobrança da
+ * vez (ex.: um cliente quer pagar R$ 20 e o outro os R$ 2 restantes, em vez
+ * de forçar 50/50) — ver [CheckoutUiState.manualSplitAmountCents]. O total
+ * continua sempre batendo com a comanda: o teclado não deixa digitar acima
+ * do saldo restante (mesma validação de qualquer outra cobrança parcial),
+ * e a divisão igual volta a valer sozinha na próxima pessoa.
+ */
 @Composable
-private fun SplitCard(state: CheckoutUiState, onSetPeople: (Int) -> Unit) {
+private fun SplitCard(state: CheckoutUiState, onSetPeople: (Int) -> Unit, onSetManualAmount: (Long) -> Unit) {
     val currentPersonIndex = state.tab?.let { tab ->
         // Quantos pagamentos já registrados nesta comanda == quantas partes já foram cobradas.
         tab.payments.count { !it.isCanceled }
     } ?: 0
     val currentPerson = (currentPersonIndex + 1).coerceAtMost(state.splitPeople)
+    var showManualAmountDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -584,7 +598,16 @@ private fun SplitCard(state: CheckoutUiState, onSetPeople: (Int) -> Unit) {
             Text("COBRANDO AGORA", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = NoktaPurpleBright)
             Spacer(Modifier.height(8.dp))
             Text(state.amountToCharge.formatBRL(), fontSize = 38.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp, color = NoktaInk)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showManualAmountDialog = true }.padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (state.manualSplitAmountCents != null) "Valor personalizado" else "Editar valor", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = NoktaPurple)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Outlined.Edit, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(12.dp))
+            }
+            Spacer(Modifier.height(4.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Person, contentDescription = null, tint = NoktaPurpleBright, modifier = Modifier.size(17.dp))
@@ -614,6 +637,20 @@ private fun SplitCard(state: CheckoutUiState, onSetPeople: (Int) -> Unit) {
                 Text("Após o pagamento, avançaremos para a próxima pessoa.", fontSize = 12.sp, color = NoktaMuted)
             }
         }
+    }
+
+    if (showManualAmountDialog) {
+        ReceivedAmountDialog(
+            // Sempre zerado, mesmo motivo de ReceivedAmountDialog do
+            // dinheiro: pré-preencher com a sugestão igualitária induziria o
+            // operador a confirmar sem checar se é isso mesmo que os
+            // clientes combinaram entre si.
+            initialCents = 0L,
+            title = "Valor desta pessoa",
+            confirmLabel = "Definir valor",
+            onConfirm = { cents -> onSetManualAmount(cents); showManualAmountDialog = false },
+            onDismiss = { showManualAmountDialog = false },
+        )
     }
 }
 

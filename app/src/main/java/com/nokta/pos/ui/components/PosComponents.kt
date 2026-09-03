@@ -336,13 +336,15 @@ fun ReceivedAmountDialog(
     initialCents: Long,
     onConfirm: (Long) -> Unit,
     onDismiss: () -> Unit,
+    title: String = "Valor recebido",
+    confirmLabel: String = "Usar valor",
 ) {
     var cents by remember { mutableStateOf(initialCents) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Valor recebido", style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(16.dp))
                 Text(
                     Money(cents).formatBRL(),
@@ -365,7 +367,7 @@ fun ReceivedAmountDialog(
                         onClick = { onConfirm(cents) },
                         enabled = cents > 0,
                         modifier = Modifier.weight(1f),
-                    ) { Text("Usar valor") }
+                    ) { Text(confirmLabel) }
                 }
             }
         }
