@@ -117,7 +117,13 @@ fun HomeScreen(
     // pilha de navegação, e o badge "Abertas" (openTabsCount) só refletia
     // dado fresco depois de visitar outra tela que sincronizasse o Room —
     // nunca a própria Home. Ver HomeViewModel.refreshOpenTabs.
-    OnResumeEffect(viewModel::refreshOpenTabs)
+    //
+    // refresh() (não só refreshOpenTabs) porque o mesmo problema vale para
+    // isCashOpen: o caixa é aberto/fechado no painel/dashboard, fora do
+    // POS — sem rechecar aqui, o chip "CAIXA ABERTO" ficava preso ao valor
+    // carregado uma única vez no init do ViewModel, nunca refletindo um
+    // fechamento feito enquanto o operador estava numa tela filha.
+    OnResumeEffect(viewModel::refresh)
 
     state.pendingPaymentAttempt?.let { attempt ->
         PendingPaymentDialog(
@@ -193,13 +199,22 @@ fun HomeContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // Coluna externa SEM scroll, ocupando a tela inteira: é ela que
+        // ancora o rodapé embaixo de verdade. O scroll fica só no bloco de
+        // conteúdo (weight(1f) abaixo) — quando o conteúdo cabe na tela, o
+        // rodapé fica colado no fim; quando não cabe, só o conteúdo rola e
+        // o rodapé continua vindo logo depois dele (nunca sobreposto).
         Column(
             Modifier
                 .fillMaxSize()
-                .background(Surface)
-                .verticalScroll(rememberScrollState()),
+                .background(Surface),
         ) {
-            Column(Modifier.padding(horizontal = Dim.ScreenPad)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Dim.ScreenPad),
+            ) {
 
                 Spacer(Modifier.height(22.dp))
 
@@ -900,7 +915,18 @@ private fun RecordRow(
                                 .background(Blue),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(it.toString(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            // lineHeight = fontSize (sem herdar o espaçamento
+                            // extra padrão da fonte) é o que de fato centraliza
+                            // o dígito na caixinha — sem isso ele fica puxado
+                            // visualmente para cima dentro do círculo.
+                            Text(
+                                it.toString(),
+                                fontSize = 10.sp,
+                                lineHeight = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center,
+                            )
                         }
                     }
                 }

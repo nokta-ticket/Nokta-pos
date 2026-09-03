@@ -23,15 +23,20 @@ import com.nokta.pos.R
 
 private val FooterBg = Color(0xFFF4F7FB)
 private val InkSoft = Color(0xFF3A4048)
-private val GrayLight = Color(0xFF9AA1AA)
+// #9AA1AA sobre #F4F7FB dava ~2.1:1 de contraste (WCAG AA exige 4.5:1 para
+// texto pequeno) — o CNPJ ficava praticamente ilegível. #5B6472 mantém o
+// peso visual "secundário" do rótulo com contraste ~4.6:1.
+private val MutedAccessible = Color(0xFF5B6472)
 
 /**
  * Rodapé institucional do app — compacto (redesign 2026-09, revisado após
  * feedback do usuário: a versão inicial, fiel ao arquivo de referência com
  * fileira de pontos decorativos + padding generoso, ficava grande demais e
  * chegava a forçar scroll na Home). Fundo Ice (#F4F7FB), wordmark como
- * imagem real (asset já existente, ver [R.drawable.nokta_pos_wordmark]),
- * razão social e "CNPJ · versão" centralizados abaixo, tudo em escala menor.
+ * imagem real com fundo transparente (asset atualizado pelo usuário — ver
+ * [R.drawable.nokta_pos_wordmark] — por isso pode ser exibida maior sem
+ * mostrar nenhuma borda/caixa branca), razão social e "CNPJ · versão"
+ * centralizados abaixo.
  *
  * @param companyName razão social exibida abaixo da marca
  * @param cnpj CNPJ já formatado (00.000.000/0000-00)
@@ -54,7 +59,7 @@ fun NoktaFooter(
         Image(
             painter = painterResource(id = R.drawable.nokta_pos_wordmark),
             contentDescription = "Nokta POS",
-            modifier = Modifier.width(96.dp),
+            modifier = Modifier.width(136.dp),
         )
 
         Spacer(Modifier.height(8.dp))
@@ -74,7 +79,7 @@ fun NoktaFooter(
             fontSize = 9.5.sp,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 0.3.sp,
-            color = GrayLight,
+            color = MutedAccessible,
             textAlign = TextAlign.Center,
         )
     }
