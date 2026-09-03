@@ -62,8 +62,8 @@ private object AbertasDim {
 }
 
 private val PageBg = Color(0xFFF7F6FA)
-private val IconBoxBg = Color(0xFFF1ECFB)
-private val BadgeBg = Color(0xFFF1EAFD)
+private val IconBoxBg = Color(0xFFE6F0FF)
+private val BadgeBg = Color(0xFFE6F0FF)
 private val LineColor = Color(0xFFEFEDF5)
 private val FieldBorder = Color(0xFFE7E4EF)
 

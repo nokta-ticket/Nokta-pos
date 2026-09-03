@@ -139,8 +139,8 @@ private object CentralDim {
 }
 
 private val CentralPageBg = Color(0xFFF7F6FA)
-private val CentralIconBoxBg = Color(0xFFF1ECFB)
-private val CentralBadgeBg = Color(0xFFF1EAFD)
+private val CentralIconBoxBg = Color(0xFFE6F0FF)
+private val CentralBadgeBg = Color(0xFFE6F0FF)
 private val CentralLineColor = Color(0xFFEFEDF5)
 private val CentralFieldBorder = Color(0xFFE7E4EF)
 

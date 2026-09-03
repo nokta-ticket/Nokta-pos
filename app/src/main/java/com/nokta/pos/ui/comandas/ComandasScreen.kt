@@ -72,7 +72,7 @@ private object Dim {
 
 private val PageBg = Color(0xFFFAFAFC)
 private val SegmentBorder = Color(0xFFEAE8F0)
-private val SelectedTint = Color(0xFFF8F4FE)
+private val SelectedTint = Color(0xFFEAF2FF)
 
 /**
  * Tela "Comandas" — fluxo simplificado por pulseira/cartão físico. Único

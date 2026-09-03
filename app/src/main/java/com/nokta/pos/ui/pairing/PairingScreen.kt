@@ -52,7 +52,7 @@ private object Dim {
 private val PageBg = Color(0xFFF8F7FB)
 private val CellBorder = Color(0xFFE9E7F0)
 private val KeyBg = Color(0xFFFBFAFD)
-private val CtaDisabledBg = Color(0xFFD9CFF2)
+private val CtaDisabledBg = Color(0xFFB3D4FF)
 private val DividerColor = Color(0xFFEDEBF3)
 
 private const val CODE_LENGTH = 6

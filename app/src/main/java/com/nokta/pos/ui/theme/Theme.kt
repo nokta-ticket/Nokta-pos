@@ -17,41 +17,45 @@ import androidx.compose.ui.unit.sp
 /**
  * Tema do POS.
  *
- * A paleta vem da identidade real da Nokta (os mesmos hex usados no
- * nokta-frontend), não de tons genéricos do Material:
+ * Paleta oficial de marca Nokta POS (2026-09-03) — PRETO + AZUL ELÉTRICO
+ * como identidade central. Azul é a cor de assinatura; cyan é só para
+ * realce/glow/gradiente, nunca preenchimento sólido de área grande. Nunca
+ * magenta/rosa (regra explícita de marca — havia um gradiente roxo→magenta
+ * no rodapé institucional antes desta paleta, removido).
  *
- *  - `#9944CC` é o roxo de marca — o mais usado no produto, presente nos
- *    gradientes de destaque da Nokta Tickets.
- *  - `#1A1626` é o "preto" da marca: um quase-preto arroxeado. Texto em
- *    preto puro (#000) ao lado de um roxo de marca parece descolado do
- *    produto; este tom amarra a tipografia à identidade sem chamar atenção.
- *  - `#ECE6F8` é a lavanda clara usada como superfície de apoio.
+ *  - Electric Blue #0066FF: primária, ação principal.
+ *  - Deep Blue #0038B8: tom mais escuro da escala azul (gradientes, hover).
+ *  - Cyan Blue #00B7FF: destaque/glow pontual, nunca área grande.
+ *  - Navy Black #080B12: "preto" da marca — usado em título/texto de alto
+ *    contraste em vez de #000 puro.
+ *  - Ice #F4F7FB: fundo claro. Slate #667085: texto secundário.
  *
- * Roxo aqui é ACENTO, não preenchimento: aparece na ação principal, em
- * estados ativos e em detalhes de marca. O corpo da interface é branco/
- * off-white com texto de alto contraste — é o que faz um POS parecer
- * instrumento de trabalho, e não uma landing page.
+ * Os nomes de variável (NoktaPurple*, NoktaAccentBlue) foram MANTIDOS —
+ * só o valor hex mudou — porque ~10 telas já referenciam esses símbolos
+ * diretamente; renomear tudo teria sido troca de escopo maior que o pedido
+ * (trocar cor, não redesenhar cada tela). Não introduzir cor de marca nova
+ * sem aprovação explícita (regra do brief).
  */
 
 // ── Marca ──
-// Escala de roxo do escuro ao claro: o gradiente da ação principal percorre
-// Darker → Deep → Bright, e o Purple sólido marca ícones e estados ativos.
-val NoktaPurpleDarker = Color(0xFF3A1195)
-val NoktaPurpleDeep = Color(0xFF4318A8)
-val NoktaPurple = Color(0xFF6D28D9)
-val NoktaPurpleBright = Color(0xFF7C3AED)
-val NoktaPurpleSoft = Color(0xFFF3EAFB)   // fundo de realce muito suave
-val NoktaLavender = Color(0xFFECE6F8)     // superfície de apoio
-val NoktaAccentBlue = Color(0xFF3399FF)   // segunda cor da marca, uso pontual
+// Mantido o nome "Purple*" por compatibilidade com ~10 telas existentes —
+// os VALORES agora são a escala azul oficial, não roxo.
+val NoktaPurpleDarker = Color(0xFF002466)     // Deep Blue escurecido, ponta do gradiente
+val NoktaPurpleDeep = Color(0xFF0038B8)       // Deep Blue
+val NoktaPurple = Color(0xFF0066FF)           // Electric Blue — primária
+val NoktaPurpleBright = Color(0xFF0066FF)     // Electric Blue — ação principal (mesmo tom, sem variante mais clara pedida)
+val NoktaPurpleSoft = Color(0xFFE6F0FF)       // fundo de realce muito suave, tom de Electric Blue
+val NoktaLavender = Color(0xFFE6F0FF)         // superfície de apoio, mesmo tom suave
+val NoktaAccentBlue = Color(0xFF00B7FF)       // Cyan Blue — realce/glow, nunca preenchimento
 
 // ── Neutros ──
-val InkBlack = Color(0xFF1B1533)          // títulos ("preto" arroxeado da marca)
-val InkSoft = Color(0xFF2A2440)           // rótulos secundários fortes
-val InkMuted = Color(0xFF7C7A8A)          // subtítulos
-val InkFaint = Color(0xFF9B99A8)          // textos auxiliares
-val SurfaceOffWhite = Color(0xFFF6F5FA)   // fundo da tela
-val BorderSubtle = Color(0xFFEFEDF5)      // borda dos cards
-val BorderStrong = Color(0xFFE7E4EF)      // borda de pill / botão
+val InkBlack = Color(0xFF080B12)          // Navy Black — títulos
+val InkSoft = Color(0xFF1A2130)           // rótulos secundários fortes (entre Navy Black e Slate)
+val InkMuted = Color(0xFF667085)          // Slate — subtítulos
+val InkFaint = Color(0xFF98A2B3)          // textos auxiliares (Slate clareado)
+val SurfaceOffWhite = Color(0xFFF4F7FB)   // Ice — fundo da tela
+val BorderSubtle = Color(0xFFE6EAF0)      // borda dos cards
+val BorderStrong = Color(0xFFD8DEE8)      // borda de pill / botão
 
 // ── Nomes de uso (o que cada cor É na tela) ──
 // Aliases dos neutros acima. Existem para que a UI diga "fundo da tela" /
@@ -96,19 +100,19 @@ private val LightColors = lightColorScheme(
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFC98BE8),
-    onPrimary = Color(0xFF2A0F3D),
-    primaryContainer = Color(0xFF3D1F52),
-    onPrimaryContainer = Color(0xFFEBD6F7),
+    primary = Color(0xFF3399FF),          // Electric Blue clareado p/ contraste em fundo escuro
+    onPrimary = Color(0xFF001433),
+    primaryContainer = Color(0xFF002466), // Deep Blue escurecido
+    onPrimaryContainer = Color(0xFFCCE4FF),
     secondary = Color(0xFF34D399),
     error = Color(0xFFF87171),
-    background = Color(0xFF121016),
-    onBackground = Color(0xFFF4F2F7),
-    surface = Color(0xFF1B1822),
-    onSurface = Color(0xFFF4F2F7),
-    surfaceVariant = Color(0xFF272332),
-    onSurfaceVariant = Color(0xFFA9A4B8),
-    outline = Color(0xFF3A3546),
+    background = Color(0xFF080B12),       // Navy Black
+    onBackground = Color(0xFFF4F7FB),     // Ice
+    surface = Color(0xFF121722),
+    onSurface = Color(0xFFF4F7FB),
+    surfaceVariant = Color(0xFF1C2433),
+    onSurfaceVariant = Color(0xFF98A2B3), // Slate clareado
+    outline = Color(0xFF2A3346),
 )
 
 /**

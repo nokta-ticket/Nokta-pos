@@ -26,12 +26,13 @@ import androidx.compose.ui.unit.sp
 import com.nokta.pos.ui.theme.NoktaInk
 import com.nokta.pos.ui.theme.NoktaMutedSoft
 
-private val CompanyText = Color(0xFF2E2560)
+private val CompanyText = Color(0xFF1A2130)
 
-// Gradiente horizontal roxo → magenta → azul da identidade Nokta (o mesmo
-// usado em destaques da marca), de ponta a ponta como divisória de seção.
+// Gradiente horizontal Deep Blue → Electric Blue → Cyan Blue (paleta
+// oficial 2026-09-03) como divisória de seção — nunca magenta/rosa, regra
+// explícita de marca.
 private val TopDividerGradient = Brush.horizontalGradient(
-    colors = listOf(Color(0xFF6D28D9), Color(0xFFD946EF), Color(0xFF3399FF))
+    colors = listOf(Color(0xFF0038B8), Color(0xFF0066FF), Color(0xFF00B7FF))
 )
 
 /**

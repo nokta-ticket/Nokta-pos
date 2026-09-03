@@ -57,8 +57,8 @@ private object Dim {
 }
 
 private val PageGray = Color(0xFFF7F6FA)
-private val SelectedTint = Color(0xFFF7F1FE)
-private val SplitCardBg = Color(0xFFF9F4FE)
+private val SelectedTint = Color(0xFFEAF2FF)
+private val SplitCardBg = Color(0xFFEAF2FF)
 private val FieldBorder = Color(0xFFE7E4EF)
 private val DangerRed = Color(0xFFDC2626)
 
@@ -373,7 +373,7 @@ private fun OrderItemRow(line: CartLine, editing: Boolean, onIncrease: () -> Uni
 @Composable
 private fun QuantityStepper(quantity: Int, onIncrease: () -> Unit, onDecrease: () -> Unit) {
     Row(
-        modifier = Modifier.height(32.dp).clip(RoundedCornerShape(9.dp)).background(SelectedTint).border(1.dp, Color(0xFFE6DBFA), RoundedCornerShape(9.dp)),
+        modifier = Modifier.height(32.dp).clip(RoundedCornerShape(9.dp)).background(SelectedTint).border(1.dp, Color(0xFFB3D4FF), RoundedCornerShape(9.dp)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(30.dp).clickable(onClick = onDecrease), contentAlignment = Alignment.Center) {
@@ -467,7 +467,7 @@ private fun SplitCard(state: BalcaoUiState, onSetPeople: (Int?) -> Unit) {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(SplitCardBg)
-                .border(1.dp, Color(0xFFDDCBFA), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0xFF99C7FF), RoundedCornerShape(16.dp))
                 .padding(horizontal = 16.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -530,14 +530,14 @@ private fun StepIndicator(currentPerson: Int, peopleCount: Int) {
                     .size(28.dp)
                     .clip(CircleShape)
                     .background(if (done) NoktaPurpleBright else Color.Transparent)
-                    .border(width = 1.dp, color = if (done) NoktaPurpleBright else Color(0xFFD5D2E0), shape = CircleShape),
+                    .border(width = 1.dp, color = if (done) NoktaPurpleBright else Color(0xFFD8DEE8), shape = CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(number.toString(), fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = if (done) Color.White else NoktaMutedSoft)
             }
 
             if (index < shown - 1) {
-                Box(Modifier.width(34.dp).height(2.dp).background(if (number < currentPerson) NoktaPurpleBright else Color(0xFFDDD8EC)))
+                Box(Modifier.width(34.dp).height(2.dp).background(if (number < currentPerson) NoktaPurpleBright else Color(0xFFD8DEE8)))
             }
         }
 
