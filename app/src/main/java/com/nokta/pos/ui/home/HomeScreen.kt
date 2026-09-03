@@ -1,6 +1,5 @@
 package com.nokta.pos.ui.home
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,15 +9,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.AddShoppingCart
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.TableRestaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,18 +25,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathFillType
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -47,6 +46,13 @@ import com.nokta.pos.ui.components.NoktaFooter
 import com.nokta.pos.ui.components.OnResumeEffect
 import com.nokta.pos.ui.components.PosInlineWarning
 import com.nokta.pos.ui.theme.*
+
+/**
+ * Fonte monoespaçada para rótulos "técnicos" (unidade, seção, status) do
+ * redesign 2026-09 — mesma linguagem visual de um terminal de pagamento.
+ * Usa a mono do sistema; nunca foi empacotada uma fonte própria.
+ */
+private val MonoFamily = FontFamily.Monospace
 
 /**
  * Home operacional. Só ações — nada de faturamento, gráficos ou indicadores
@@ -180,29 +186,32 @@ fun HomeContent(
                     onCashBellClick = onOpenCashWarning,
                 )
 
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(20.dp))
 
                 StatusRow(state = state)
 
                 if (!access.canTakePayments) {
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(16.dp))
                     PosInlineWarning(
                         "Seu perfil não registra pagamentos. Você lança itens; o fechamento é do caixa.",
                     )
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(20.dp))
 
                 NewSaleCard(enabled = access.canSellAtCounter, onClick = onNovaVenda)
 
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(24.dp))
+
+                SectionLabel("OPERAÇÕES")
 
                 val tables: @Composable RowScope.() -> Unit = {
                     BigActionCard(
                         modifier = Modifier.weight(1f),
+                        index = "01",
                         icon = Icons.Outlined.TableRestaurant,
                         title = "Mesas",
-                        subtitle = "Consultar consumo\ne lançar itens",
+                        subtitle = "Consumo e\nlançamento de itens",
                         enabled = access.canViewTables,
                         onClick = onMesas,
                     )
@@ -210,22 +219,24 @@ fun HomeContent(
                 val tabs: @Composable RowScope.() -> Unit = {
                     BigActionCard(
                         modifier = Modifier.weight(1f),
+                        index = "02",
                         icon = Icons.Outlined.ReceiptLong,
                         title = "Comandas",
-                        subtitle = "Abrir e consultar por\npulseira ou cartão",
+                        subtitle = "Por pulseira\nou cartão",
                         enabled = access.canViewTabs,
                         onClick = onComandas,
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
                     // Balcão puro: comanda antes de mesa (mesa quase não é usada).
                     if (state.highlightTables) { tables(); tabs() } else { tabs(); tables() }
                 }
 
                 if (access.canViewTabs) {
-                    Spacer(Modifier.height(18.dp))
-                    ShortcutsRow(
+                    Spacer(Modifier.height(24.dp))
+                    SectionLabel("REGISTROS")
+                    RegistrosList(
                         openTabsCount = state.openTabsCount,
                         onOpenTabs = onAbertas,
                         onHistory = onHistorico,
@@ -408,6 +419,10 @@ private fun LogoutConfirmationDialog(onConfirm: () -> Unit, onDismiss: () -> Uni
  * O nome do operador é o único texto forte aqui; a unidade é contexto. O papel
  * (WAITER/CASHIER) não aparece: é informação administrativa que não muda nada
  * no que o operador faz nesta tela.
+ *
+ * Redesign 2026-09: tiles quadrados de ícone (sino + sair) no lugar dos pills
+ * antigos, e a unidade vira um rótulo mono/uppercase em azul — mesma
+ * linguagem visual "instrumento" do restante da tela nova.
  */
 @Composable
 private fun Header(
@@ -431,29 +446,20 @@ private fun Header(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            if (showCashBell) {
-                CashBellButton(active = cashWarningActive, onClick = onCashBellClick)
-                Spacer(Modifier.width(8.dp))
-            }
-
-            Row(
-                modifier = Modifier
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(NoktaSurface)
-                    .border(1.dp, NoktaBorderStrong, RoundedCornerShape(12.dp))
-                    .clickable(onClick = onLogout)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.Logout,
-                    contentDescription = null,
-                    tint = NoktaInkSoft,
-                    modifier = Modifier.size(16.dp),
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showCashBell) {
+                    IconTile(
+                        icon = Icons.Filled.Notifications,
+                        badge = cashWarningActive,
+                        contentDescription = if (cashWarningActive) "Avisos (caixa fechado)" else "Avisos",
+                        onClick = onCashBellClick,
+                    )
+                }
+                IconTile(
+                    icon = Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = "Sair",
+                    onClick = onLogout,
                 )
-                Spacer(Modifier.width(6.dp))
-                Text("Sair", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NoktaInkSoft)
             }
         }
 
@@ -462,49 +468,54 @@ private fun Header(
         // Unidade Barra da Tijuca") era abreviado sem necessidade. Sobra
         // espaço vertical de sobra nesta tela; largura é que era escassa.
         unitName?.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(6.dp))
             Text(
-                text = it,
-                fontSize = 14.sp,
-                lineHeight = 19.sp,
-                color = NoktaMuted,
+                text = it.uppercase(),
+                fontFamily = MonoFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 2.sp,
+                lineHeight = 15.sp,
+                color = NoktaPurple,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
     }
 }
 
 /**
- * Sino de avisos operacionais (hoje só caixa fechado). Badge vermelho só
- * quando há algo pendente — sem badge, o sino fica neutro (mesmo visual do
- * botão "Sair" ao lado) para não competir por atenção à toa.
+ * Tile quadrado de ícone — usado tanto para o sino de avisos quanto para
+ * "Sair". Fiel ao mockup: só borda fina (sem fundo/clip próprio), badge
+ * ciano fixo (não muda de cor por estado) quando há algo pendente.
  */
 @Composable
-private fun CashBellButton(active: Boolean, onClick: () -> Unit) {
+private fun IconTile(
+    icon: ImageVector,
+    contentDescription: String?,
+    badge: Boolean = false,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(NoktaSurface)
-            .border(1.dp, NoktaBorderStrong, RoundedCornerShape(12.dp))
+            .size(34.dp)
+            .border(1.dp, NoktaInk.copy(alpha = 0.14f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = Icons.Outlined.Notifications,
-            contentDescription = if (active) "Avisos (caixa fechado)" else "Avisos",
-            tint = if (active) WarningAmber else NoktaInkSoft,
-            modifier = Modifier.size(18.dp),
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = NoktaInk,
+            modifier = Modifier.size(15.dp),
         )
-        if (active) {
+        if (badge) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 6.dp, end = 6.dp)
+                    .offset(x = 3.dp, y = (-3).dp)
                     .size(7.dp)
-                    .clip(CircleShape)
-                    .background(AlertRed),
+                    .background(NoktaAccentBlue, RoundedCornerShape(50)),
             )
         }
     }
@@ -513,14 +524,18 @@ private fun CashBellButton(active: Boolean, onClick: () -> Unit) {
 /* ---------------------------- Status row ---------------------------- */
 
 /**
- * Conexão e sincronização — deliberadamente discreto. O operador precisa saber
- * que a máquina está funcionando, mas isso nunca pode competir com "Nova
- * venda".
+ * Conexão, sincronização e caixa — deliberadamente discreto. O operador
+ * precisa saber que a máquina está funcionando, mas isso nunca pode competir
+ * com "Nova venda".
  *
- * O estado real vem da fila de sincronização (outbox), não de um ping de rede:
- * o que importa para o operador não é "tem sinal", e sim "o que eu registrei
- * já subiu". Enquanto houver pendência, o rótulo fica âmbar e avisa; sem
- * pendência, verde e silencioso.
+ * Redesign 2026-09: chips lado a lado (estilo mockup) em vez de pill +
+ * detalhe à direita. Mesma fonte de estado de sempre (fila de sincronização,
+ * não ping de rede) — só a apresentação mudou. O chip de caixa é novo:
+ * usa [HomeUiState.isCashOpen] (já carregado por HomeViewModel.loadCashStatus)
+ * e só aparece quando a unidade exige caixa aberto para pagar
+ * ([HomeUiState.requiresCashSession]) — sem isso, `isCashOpen` fica sempre
+ * `null` e não há nada de útil para mostrar (nunca escrito como "fechado" por
+ * engano).
  */
 @Composable
 private fun StatusRow(state: HomeUiState) {
@@ -535,75 +550,80 @@ private fun StatusRow(state: HomeUiState) {
     }
 
     val statusLabel = when (connection) {
-        ConnectionState.ONLINE -> "Online"
-        ConnectionState.SYNCING -> "Sincronizando"
-        ConnectionState.PENDING -> "Pendente"
-        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> "Offline"
+        ConnectionState.ONLINE -> "ONLINE"
+        ConnectionState.SYNCING -> "SINCRONIZANDO"
+        ConnectionState.PENDING -> "PENDENTE"
+        ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> "OFFLINE"
     }
 
     val pending = state.pendingSyncCount
-    val detail = when (connection) {
-        ConnectionState.ONLINE -> "Sincronizado agora"
-        ConnectionState.SYNCING -> "Enviando dados…"
-        ConnectionState.PENDING -> "$pending ${if (pending == 1) "operação" else "operações"} na fila"
+    val syncLabel = when (connection) {
+        ConnectionState.ONLINE -> "SYNC · AGORA"
+        ConnectionState.SYNCING -> "SYNC · ENVIANDO"
+        ConnectionState.PENDING -> "SYNC · $pending NA FILA"
         // Sem fila, o operador ainda precisa saber que está sem rede — a
         // mensagem foca só nisso, sem misturar com "última sincronização"
         // (as duas ideias juntas soam contraditórias: "sem conexão —
         // sincronizado agora").
-        ConnectionState.OFFLINE -> "Sem sincronização"
+        ConnectionState.OFFLINE -> "SYNC · SEM REDE"
         // Com fila, o risco real é desligar o terminal com venda presa nele.
         // "Operações", não "vendas": uma única venda pode gerar várias
         // entradas na fila (abrir comanda, lançar pedido, registrar
         // pagamento, fechar) — contar isso como "vendas" engana o operador
         // sobre quantas vendas de fato ficaram presas.
-        ConnectionState.OFFLINE_PENDING ->
-            "$pending ${if (pending == 1) "operação não enviada" else "operações não enviadas"}"
+        ConnectionState.OFFLINE_PENDING -> "SYNC · $pending PENDENTE"
     }
 
-    // Só os estados que exigem atenção puxam cor no texto auxiliar; os demais
-    // ficam cinza para não competir com a ação principal.
-    val detailColor = when (connection) {
+    // Só os estados que exigem atenção puxam cor; os demais ficam cinza para
+    // não competir com a ação principal.
+    val syncColor = when (connection) {
         ConnectionState.PENDING -> WarningAmber
         ConnectionState.OFFLINE, ConnectionState.OFFLINE_PENDING -> AlertRed
         else -> NoktaMutedSoft
     }
 
-    val detailIcon = when (connection) {
-        ConnectionState.ONLINE -> Icons.Outlined.CheckCircle
-        ConnectionState.SYNCING -> Icons.Outlined.Sync
-        else -> Icons.Outlined.CloudOff
-    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        StatusChip(label = statusLabel, textColor = NoktaInk, dotColor = dotColor)
+        StatusChip(label = syncLabel, textColor = syncColor, icon = Icons.Filled.Sync)
 
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(NoktaSurface)
-                .border(1.dp, NoktaBorderStrong, CircleShape)
-                .padding(horizontal = 13.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(dotColor))
-            Spacer(Modifier.width(8.dp))
-            Text(statusLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = NoktaInkSoft)
+        state.isCashOpen?.takeIf { state.requiresCashSession }?.let { cashOpen ->
+            StatusChip(
+                label = if (cashOpen) "CAIXA ABERTO" else "CAIXA FECHADO",
+                textColor = Color.White,
+                bg = if (cashOpen) NoktaPurple else AlertRed,
+                icon = Icons.Filled.PointOfSale,
+            )
         }
+    }
+}
 
-        Spacer(Modifier.weight(1f))
-
-        Text(
-            text = detail,
-            fontSize = 12.sp,
-            color = detailColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.width(6.dp))
-        Icon(
-            imageVector = detailIcon,
-            contentDescription = null,
-            tint = detailColor,
-            modifier = Modifier.size(15.dp),
-        )
+/** Chip de status: borda fina por padrão, ou preenchido quando [bg] é passado (ex.: "CAIXA ABERTO"). */
+@Composable
+private fun StatusChip(
+    label: String,
+    textColor: Color,
+    bg: Color = Color.Transparent,
+    dotColor: Color? = null,
+    icon: ImageVector? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        modifier = Modifier
+            .then(if (bg == Color.Transparent) Modifier.border(1.dp, NoktaInk.copy(alpha = 0.12f)) else Modifier)
+            .background(bg)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        dotColor?.let {
+            Box(modifier = Modifier.size(6.dp).background(it, RoundedCornerShape(50)))
+        }
+        icon?.let {
+            Icon(it, contentDescription = null, tint = textColor, modifier = Modifier.size(10.dp))
+        }
+        Text(label, fontFamily = MonoFamily, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = textColor)
     }
 }
 
@@ -625,272 +645,213 @@ private fun relativeSince(epochMs: Long): String {
 /* --------------------------- Nova venda ----------------------------- */
 
 /**
- * A ação dominante. É o único bloco em gradiente de marca da tela inteira —
- * é isso que a faz vencer sem precisar ser gigante, e o que impede o roxo de
- * virar preenchimento no resto da interface.
+ * A ação dominante. Redesign 2026-09: bloco flat (Electric Blue chapado, sem
+ * gradiente) com o canto inferior-esquerdo recortado — é o único elemento
+ * "de marca" fora do padrão retangular da tela, o que basta para vencer sem
+ * precisar de gradiente/glow.
  */
 @Composable
 private fun NewSaleCard(enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(118.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(NoktaPurpleDarker, NoktaPurpleDeep, NoktaPurpleBright),
-                    start = Offset(0f, 0f),
-                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-                ),
-            )
+            .clip(notchedCornerShape(24.dp))
+            .background(NoktaPurple)
             .clickable(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.5f),
+            .alpha(if (enabled) 1f else 0.5f)
+            .padding(22.dp),
     ) {
-        // Círculos de luz no canto direito: dão profundidade ao bloco sem
-        // sombra nem brilho exagerado.
-        Canvas(Modifier.fillMaxSize()) {
-            drawCircle(
-                color = Color.White.copy(alpha = 0.06f),
-                radius = size.height * 0.95f,
-                center = Offset(size.width * 0.88f, size.height * 0.52f),
+        Column {
+            Text(
+                text = "AÇÃO RÁPIDA",
+                fontFamily = MonoFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 2.sp,
+                color = Color.White.copy(alpha = 0.65f),
             )
-            drawCircle(
-                color = Color.White.copy(alpha = 0.05f),
-                radius = size.height * 0.62f,
-                center = Offset(size.width * 1.02f, size.height * 0.30f),
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center,
+            Spacer(Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.AddShoppingCart,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(27.dp),
-                )
+                Column {
+                    Text("Nova venda", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    Text("Balcão · cobrar na hora", fontSize = 13.5.sp, color = Color.White.copy(alpha = 0.75f))
+                }
+                Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White)
             }
-
-            Spacer(Modifier.width(16.dp))
-
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Nova venda",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.3).sp,
-                    color = Color.White,
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "Balcão · cobrar na hora",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.75f),
-                )
-            }
-
-            Icon(ChevronRightThin, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
         }
     }
 }
 
+/**
+ * Recorte de canto: topo e direita retos, o canto inferior-esquerdo é
+ * cortado em diagonal por [notch]. Assinatura visual do redesign 2026-09
+ * (card de "Nova venda"), no lugar do card 100% arredondado anterior.
+ *
+ * `Shape` (não `GenericShape`) porque `createOutline` recebe [Density] como
+ * parâmetro nomeado de verdade — evita depender da assinatura pouco óbvia
+ * do lambda de `GenericShape` (size, LayoutDirection), que não tem acesso a
+ * densidade nenhuma.
+ */
+private fun notchedCornerShape(notch: Dp): Shape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val n = with(density) { notch.toPx() }
+        val path = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(size.width, 0f)
+            lineTo(size.width, size.height)
+            lineTo(n, size.height)
+            lineTo(0f, size.height - n)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
+/** Rótulo de seção mono/uppercase — "OPERAÇÕES", "REGISTROS". */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        fontFamily = MonoFamily,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 2.sp,
+        color = NoktaInk.copy(alpha = 0.35f),
+        modifier = Modifier.padding(bottom = 12.dp),
+    )
+}
+
 /* -------------------------- Cards grandes --------------------------- */
 
+/**
+ * Redesign 2026-09: fundo Ice flat (sem borda/sombra), índice numerado no
+ * canto ("01", "02") e call-to-action mono "ABRIR →" no lugar do chevron —
+ * mesma linguagem "instrumento técnico" do resto da tela.
+ */
 @Composable
 private fun BigActionCard(
     modifier: Modifier = Modifier,
+    index: String,
     icon: ImageVector,
     title: String,
     subtitle: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    Column(
+    Box(
         modifier = modifier
-            .height(180.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(NoktaSurface)
-            .border(1.dp, NoktaBorder, RoundedCornerShape(18.dp))
+            .heightIn(min = 150.dp)
+            .background(NoktaBackground)
             .clickable(enabled = enabled, onClick = onClick)
             .alpha(if (enabled) 1f else 0.5f)
-            .padding(18.dp),
+            .padding(16.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(30.dp))
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, color = NoktaInk)
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(subtitle, fontSize = 13.sp, lineHeight = 19.sp, color = NoktaMuted)
-
-        Spacer(Modifier.weight(1f))
-
-        Icon(
-            ChevronRightThin,
-            contentDescription = null,
-            tint = NoktaMutedSoft,
-            modifier = Modifier.align(Alignment.End).size(20.dp),
+        Text(
+            index,
+            fontFamily = MonoFamily,
+            fontSize = 10.sp,
+            color = NoktaInk.copy(alpha = 0.25f),
+            modifier = Modifier.align(Alignment.TopEnd),
         )
+        Column(Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .border(1.dp, NoktaPurple.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(15.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+            Spacer(Modifier.height(5.dp))
+            Text(subtitle, fontSize = 12.5.sp, lineHeight = 17.sp, color = NoktaMuted, modifier = Modifier.weight(1f))
+            Text("ABRIR →", fontFamily = MonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NoktaPurple)
+        }
     }
 }
 
 /* ------------------------ Atalhos inferiores ------------------------ */
 
 /**
- * Faixa de atalhos secundários: o que segue aberto e o que já foi fechado.
- *
- * Fica abaixo das ações principais e em peso visual menor de propósito — é
- * consulta de apoio, não caminho de venda. A contagem de abertas some
- * enquanto carrega (ou se a chamada falhar): um número errado sobre quantas
- * mesas estão em aberto é pior do que número nenhum.
+ * Lista "REGISTROS": o que segue aberto e o que já foi fechado. Redesign
+ * 2026-09: linhas com divisor fino no lugar do card com divisória central —
+ * mesmo peso visual secundário de antes (é consulta de apoio, não caminho de
+ * venda). A contagem de abertas some enquanto carrega (ou se a chamada
+ * falhar): um número errado sobre quantas mesas estão em aberto é pior do
+ * que número nenhum.
  */
 @Composable
-private fun ShortcutsRow(
+private fun RegistrosList(
     openTabsCount: Int?,
     onOpenTabs: () -> Unit,
     onHistory: () -> Unit,
 ) {
+    Column {
+        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
+        RegistroRow(
+            title = "Abertas",
+            description = when (openTabsCount) {
+                null -> "Mesas e comandas abertas"
+                0 -> "Nada em aberto"
+                else -> "Mesas e comandas abertas"
+            },
+            badgeCount = openTabsCount?.takeIf { it > 0 },
+            onClick = onOpenTabs,
+        )
+        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
+        RegistroRow(
+            title = "Histórico",
+            description = "Ver vendas encerradas",
+            badgeCount = null,
+            onClick = onHistory,
+        )
+        HorizontalDivider(color = NoktaInk.copy(alpha = 0.1f))
+    }
+}
+
+@Composable
+private fun RegistroRow(
+    title: String,
+    description: String,
+    badgeCount: Int?,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(NoktaSurface)
-            .border(1.dp, NoktaBorder, RoundedCornerShape(16.dp))
-            .height(72.dp),
+            .clickable(onClick = onClick)
+            .padding(vertical = 16.dp, horizontal = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onOpenTabs)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("»", color = NoktaPurple, fontFamily = MonoFamily, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Outlined.MenuBook,
-                        contentDescription = null,
-                        tint = NoktaInkSoft,
-                        modifier = Modifier.size(17.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Abertas", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk)
-                    if (openTabsCount != null && openTabsCount > 0) {
+                    Text(title, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = NoktaInk)
+                    badgeCount?.let {
                         Spacer(Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .size(21.dp)
                                 .clip(CircleShape)
-                                .background(NoktaPurpleBright),
+                                .background(NoktaPurple),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                text = openTabsCount.toString(),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                            )
+                            Text(it.toString(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = when (openTabsCount) {
-                        null -> "Mesas e comandas abertas"
-                        0 -> "Nada em aberto"
-                        else -> "Mesas e comandas abertas"
-                    },
-                    fontSize = 11.5.sp,
-                    color = NoktaMutedSoft,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Text(description, fontSize = 12.sp, color = NoktaMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-
-        Box(Modifier.width(1.dp).height(44.dp).background(NoktaBorder))
-
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onHistory)
-                .padding(start = 16.dp, end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        tint = NoktaInkSoft,
-                        modifier = Modifier.size(17.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Histórico", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NoktaInk)
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Ver vendas encerradas",
-                    fontSize = 11.5.sp,
-                    color = NoktaMutedSoft,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Icon(
-                ChevronRightThin,
-                contentDescription = null,
-                tint = NoktaMutedSoft,
-                modifier = Modifier.size(20.dp),
-            )
-        }
+        Icon(Icons.Filled.History, contentDescription = null, tint = NoktaMutedSoft, modifier = Modifier.size(14.dp))
     }
-}
-
-/* --------------------- Chevron fino (custom) ------------------------ */
-
-/**
- * O chevron do Material é curto e grosso demais para este acabamento. Este é
- * mais fino e alongado — some visualmente até você procurar por ele, que é o
- * papel de um indicador de "entra aqui".
- */
-private val ChevronRightThin: ImageVector by lazy {
-    ImageVector.Builder(
-        name = "ChevronRightThin",
-        defaultWidth = 24.dp,
-        defaultHeight = 24.dp,
-        viewportWidth = 24f,
-        viewportHeight = 24f,
-    ).apply {
-        path(
-            fill = null,
-            stroke = SolidColor(Color.Black),
-            strokeLineWidth = 1.9f,
-            strokeLineCap = StrokeCap.Round,
-            strokeLineJoin = StrokeJoin.Round,
-            strokeLineMiter = 10f,
-            pathFillType = PathFillType.NonZero,
-        ) {
-            moveTo(9f, 5.5f)
-            lineTo(15.5f, 12f)
-            lineTo(9f, 18.5f)
-        }
-    }.build()
 }
 
 /* ------------------------------ Diálogo ----------------------------- */
