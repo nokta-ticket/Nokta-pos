@@ -745,7 +745,7 @@ private fun BigActionCard(
     Box(
         modifier = modifier
             .heightIn(min = 150.dp)
-            .background(NoktaBackground)
+            .background(NoktaSurface)
             .clickable(enabled = enabled, onClick = onClick)
             .alpha(if (enabled) 1f else 0.5f)
             .padding(16.dp),
