@@ -130,7 +130,7 @@ fun BalcaoPagamentoScreen(
 
                 state.errorMessage?.let { message ->
                     Spacer(Modifier.height(Dim.SectionGap))
-                    PosInlineWarning(message, tone = PosBadgeTone.DANGER)
+                    PosInlineWarning(message, tone = state.errorTone)
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = onDismissError) { Text("Entendi") }
                 }

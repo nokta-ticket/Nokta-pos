@@ -15,6 +15,7 @@ import com.nokta.pos.payment.domain.PaymentRequest
 import com.nokta.pos.payment.domain.PaymentResult
 import com.nokta.pos.payment.domain.PosPaymentMethod
 import com.nokta.pos.payment.domain.SplitCalculator
+import com.nokta.pos.ui.components.PosBadgeTone
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +41,13 @@ data class BalcaoUiState(
     val isProcessing: Boolean = false,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
+    /**
+     * DANGER (padrão) para recusa/falha real — WARNING para cancelamento no
+     * terminal, que é uma ação neutra do operador/cliente desistindo, não um
+     * erro do sistema (a cor vermelha + "Entendi" de erro grave confundia o
+     * operador num cenário sem nada de errado acontecendo).
+     */
+    val errorTone: PosBadgeTone = PosBadgeTone.DANGER,
     val tab: Tab? = null,
     /**
      * Cobrança JÁ capturada no cartão cujo registro no Nokta falhou. Enquanto
@@ -346,7 +354,7 @@ class BalcaoViewModel @Inject constructor(
                 externalReference = result.providerTransactionId,
             )
             is PaymentResult.Declined -> failPayment("Pagamento recusado: ${result.reason}")
-            is PaymentResult.Cancelled -> failPayment("Pagamento cancelado no terminal.")
+            is PaymentResult.Cancelled -> failPayment("Pagamento cancelado no terminal.", tone = PosBadgeTone.WARNING)
             is PaymentResult.Failed -> failPayment(result.errorMessage)
             is PaymentResult.Unknown -> failPayment(
                 "Não foi possível confirmar o resultado. Verifique o extrato do terminal antes de cobrar de novo.",
@@ -354,7 +362,7 @@ class BalcaoViewModel @Inject constructor(
         }
     }
 
-    private fun failPayment(message: String) {
+    private fun failPayment(message: String, tone: PosBadgeTone = PosBadgeTone.DANGER) {
         // Nada foi criado no Nokta ainda — o operador pode trocar de método e
         // tentar de novo sem deixar comanda pela metade. Fica na própria tela
         // de Pagamento (nunca volta pro CART) porque é ela quem sabe exibir
@@ -365,6 +373,7 @@ class BalcaoViewModel @Inject constructor(
             isProcessing = false,
             statusMessage = null,
             errorMessage = message,
+            errorTone = tone,
         )
     }
 
