@@ -64,6 +64,15 @@ data class BalcaoUiState(
     val splitPeople: Int? = null,
     /** Quantas partes já foram cobradas com sucesso nesta venda. */
     val paidParts: Int = 0,
+    /**
+     * Sobrescreve a divisão igualitária SÓ para a cobrança da vez, quando o
+     * operador escolhe "Editar valor" (ex.: um cliente quer pagar R$ 20 e o
+     * outro os R$ 2 restantes, em vez de forçar 50/50). Nunca persiste entre
+     * partes: [BalcaoViewModel.advanceToNextPart]/[BalcaoViewModel.reset]
+     * sempre zeram este campo, então a próxima parte volta a sugerir a
+     * divisão igual do que ainda resta.
+     */
+    val manualSplitAmountCents: Long? = null,
     /** Modo de edição inline do resumo do pedido (+/−/remover por item). */
     val isEditingCart: Boolean = false,
     /** Linha do carrinho aguardando confirmação de remoção. */
@@ -80,14 +89,20 @@ data class BalcaoUiState(
     val amountToCharge: Money
         get() {
             val people = splitPeople ?: return remaining
+            manualSplitAmountCents?.let { return Money(it) }
             val peopleLeft = (people - paidParts).coerceAtLeast(1)
             return SplitCalculator.splitRemaining(remaining, peopleLeft).first()
         }
 
+    /** Valida o valor manual contra o saldo restante — mesmo critério de qualquer cobrança parcial. */
+    val manualSplitAmountValid: Boolean
+        get() = manualSplitAmountCents == null || (manualSplitAmountCents in 1..remaining.cents)
+
     val changeDue: Money?
         get() = receivedCents?.takeIf { it > amountToCharge.cents }?.let { Money(it - amountToCharge.cents) }
     val canConfirmCash: Boolean
-        get() = selectedMethod != PosPaymentOption.CASH || receivedCents == null || receivedCents >= amountToCharge.cents
+        get() = manualSplitAmountValid &&
+            (selectedMethod != PosPaymentOption.CASH || receivedCents == null || receivedCents >= amountToCharge.cents)
 
     /** Rótulo do botão de confirmar quando há divisão: "Cobrar parte 2 de 4". */
     val partLabel: String?
@@ -251,7 +266,14 @@ class BalcaoViewModel @Inject constructor(
      * muda o total da venda nem cria mais de uma comanda.
      */
     fun setSplitPeople(people: Int?) {
-        _state.value = _state.value.copy(splitPeople = people?.coerceIn(2, 20), receivedCents = null)
+        // Mudar o número de pessoas invalida qualquer valor manual já
+        // digitado para a divisão anterior — volta a sugerir igual.
+        _state.value = _state.value.copy(splitPeople = people?.coerceIn(2, 20), receivedCents = null, manualSplitAmountCents = null)
+    }
+
+    /** "Editar valor" no card de divisão: sobrescreve a parte da vez com um valor digitado pelo operador. */
+    fun setManualSplitAmount(cents: Long) {
+        _state.value = _state.value.copy(manualSplitAmountCents = cents, receivedCents = null)
     }
 
     /** Valor entregue pelo cliente em dinheiro — o troco é calculado, nunca digitado. */
@@ -478,6 +500,9 @@ class BalcaoViewModel @Inject constructor(
                     statusMessage = null,
                     awaitingRegistrationRetry = false,
                     receivedCents = null,
+                    // A próxima pessoa volta a ver a sugestão igualitária
+                    // sobre o que ainda resta, não o valor manual desta parte.
+                    manualSplitAmountCents = null,
                     tab = tab,
                     paidParts = _state.value.paidParts + 1,
                 )

@@ -48,6 +48,7 @@ fun NovaVendaScreen(
             onSelectMethod = viewModel::selectMethod,
             onSetReceived = viewModel::setReceived,
             onSetSplitPeople = viewModel::setSplitPeople,
+            onSetManualSplitAmount = viewModel::setManualSplitAmount,
             onToggleEditCart = viewModel::toggleEditCart,
             onIncreaseLine = viewModel::increaseCartLine,
             onDecreaseLine = viewModel::decreaseCartLine,

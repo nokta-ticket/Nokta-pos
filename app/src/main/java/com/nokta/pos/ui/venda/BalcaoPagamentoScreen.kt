@@ -81,6 +81,7 @@ fun BalcaoPagamentoScreen(
     onSelectMethod: (PosPaymentOption) -> Unit,
     onSetReceived: (Long?) -> Unit,
     onSetSplitPeople: (Int?) -> Unit,
+    onSetManualSplitAmount: (Long) -> Unit,
     onToggleEditCart: () -> Unit,
     onIncreaseLine: (CartLine) -> Unit,
     onDecreaseLine: (CartLine) -> Unit,
@@ -144,7 +145,7 @@ fun BalcaoPagamentoScreen(
                 AnimatedVisibility(visible = state.splitPeople != null) {
                     Column {
                         Spacer(Modifier.height(14.dp))
-                        SplitCard(state = state, onSetPeople = onSetSplitPeople)
+                        SplitCard(state = state, onSetPeople = onSetSplitPeople, onSetManualAmount = onSetManualSplitAmount)
                     }
                 }
 
@@ -431,15 +432,19 @@ private fun AmountField(amount: Money) {
 }
 
 /**
- * Contador de pessoas + card roxo grande com o valor da parte atual e
- * progresso. O valor cobrado AGORA é sempre a parte de 1 pessoa dividindo o
- * que ainda falta pelas pessoas que ainda não pagaram (`state.amountToCharge`),
- * nunca o total original recalculado.
+ * Contador de pessoas + card com o valor da parte atual e progresso. O valor
+ * cobrado AGORA é sempre a parte de 1 pessoa dividindo o que ainda falta
+ * pelas pessoas que ainda não pagaram (`state.amountToCharge`), nunca o
+ * total original recalculado — a menos que o operador tenha digitado um
+ * valor manual para esta parte via "Editar valor" (ver
+ * [BalcaoUiState.manualSplitAmountCents]: um cliente paga R$ 20 e o outro os
+ * R$ 2 restantes, em vez de forçar divisão igual).
  */
 @Composable
-private fun SplitCard(state: BalcaoUiState, onSetPeople: (Int?) -> Unit) {
+private fun SplitCard(state: BalcaoUiState, onSetPeople: (Int?) -> Unit, onSetManualAmount: (Long) -> Unit) {
     val people = state.splitPeople ?: 2
     val currentPerson = (state.paidParts + 1).coerceAtMost(people)
+    var showManualAmountDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -474,7 +479,16 @@ private fun SplitCard(state: BalcaoUiState, onSetPeople: (Int?) -> Unit) {
             Text("COBRANDO AGORA", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = NoktaPurpleBright)
             Spacer(Modifier.height(8.dp))
             Text(state.amountToCharge.formatBRL(), fontSize = 38.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp, color = NoktaInk)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showManualAmountDialog = true }.padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (state.manualSplitAmountCents != null) "Valor personalizado" else "Editar valor", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = NoktaPurple)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Outlined.Edit, contentDescription = null, tint = NoktaPurple, modifier = Modifier.size(12.dp))
+            }
+            Spacer(Modifier.height(4.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Person, contentDescription = null, tint = NoktaPurpleBright, modifier = Modifier.size(17.dp))
@@ -504,6 +518,20 @@ private fun SplitCard(state: BalcaoUiState, onSetPeople: (Int?) -> Unit) {
                 Text("Após o pagamento, avançaremos para a próxima pessoa.", fontSize = 12.sp, color = NoktaMuted)
             }
         }
+    }
+
+    if (showManualAmountDialog) {
+        ReceivedAmountDialog(
+            // Sempre zerado, mesmo motivo do diálogo de "valor recebido" em
+            // dinheiro: pré-preencher com a sugestão igualitária induziria o
+            // operador a confirmar sem checar se é isso mesmo que os
+            // clientes combinaram entre si.
+            initialCents = 0L,
+            title = "Valor desta pessoa",
+            confirmLabel = "Definir valor",
+            onConfirm = { cents -> onSetManualAmount(cents); showManualAmountDialog = false },
+            onDismiss = { showManualAmountDialog = false },
+        )
     }
 }
 
