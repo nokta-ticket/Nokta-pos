@@ -149,6 +149,7 @@ fun HomeScreen(
         onDismissCashWarning = viewModel::dismissCashWarningDialog,
         onDismissSyncRejection = viewModel::dismissSyncRejection,
         onDismissPaymentReconciliationMessage = viewModel::dismissPaymentReconciliationMessage,
+        onDismissRecoveredPayment = viewModel::dismissRecoveredPaymentMessage,
     )
 }
 
@@ -185,6 +186,7 @@ fun HomeContent(
     onDismissCashWarning: () -> Unit = {},
     onDismissSyncRejection: () -> Unit = {},
     onDismissPaymentReconciliationMessage: () -> Unit = {},
+    onDismissRecoveredPayment: () -> Unit = {},
 ) {
     val access = state.access
 
@@ -359,6 +361,15 @@ fun HomeContent(
                 onDismiss = onDismissLogoutConfirmation,
             )
         }
+
+        // Um pagamento aprovado na maquininha que tinha ficado órfão (app
+        // morto antes de registrar) acabou de ser recuperado. É diálogo, não
+        // toast: o operador precisa ver que aquela cobrança entrou no
+        // sistema — se ela sumisse da tela sozinha, ele poderia cobrar de
+        // novo achando que o pagamento se perdeu.
+        state.recoveredPaymentMessage?.let { message ->
+            RecoveredPaymentDialog(message = message, onDismiss = onDismissRecoveredPayment)
+        }
     }
 }
 
@@ -394,6 +405,22 @@ private fun CashClosedToast(modifier: Modifier = Modifier, onDismiss: () -> Unit
                 .padding(horizontal = 10.dp, vertical = 2.dp),
         )
     }
+}
+
+/**
+ * Pagamento aprovado na Cielo que ficou órfão por process death e foi
+ * registrado agora, com a mesma chave de idempotência (ver
+ * [HomeViewModel.recoverApprovedPaymentIfAny]). Fecha só reconhecendo — não
+ * há nada a decidir, o dinheiro já está no lugar certo.
+ */
+@Composable
+private fun RecoveredPaymentDialog(message: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Entendi") } },
+        title = { Text("Pagamento recuperado") },
+        text = { Text(message) },
+    )
 }
 
 @Composable

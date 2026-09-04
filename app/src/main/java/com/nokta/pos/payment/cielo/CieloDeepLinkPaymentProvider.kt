@@ -63,12 +63,37 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
         val credentials = credentialsProvider.current()
             ?: return PaymentResult.Failed(request.attemptId, "Terminal não configurado para pagamento por cartão. Reabra o pareamento.")
 
+        // Nunca iniciar uma cobrança nova por cima de uma tentativa anterior
+        // cujo desfecho ninguém conhece: a store guarda UMA tentativa, e
+        // sobrescrevê-la apagaria o único rastro de que o cliente pode já ter
+        // sido cobrado. Uma aprovação já registrada em disco (callback que
+        // chegou com o processo morto) bloqueia pelo mesmo motivo — ela
+        // precisa ser registrada/resolvida antes, não enterrada por uma
+        // segunda cobrança.
+        pendingAttemptStore.approvedResult()?.let { approved ->
+            if (approved.attemptId != request.attemptId) {
+                return PaymentResult.Failed(
+                    request.attemptId,
+                    "Há um pagamento aprovado ainda não registrado neste terminal. Resolva-o antes de cobrar de novo.",
+                )
+            }
+        }
+        pendingAttemptStore.current()?.let { existing ->
+            if (existing.attemptId != request.attemptId) {
+                return PaymentResult.Failed(
+                    request.attemptId,
+                    "Há uma cobrança anterior sem resultado confirmado neste terminal. Confira o extrato e resolva-a antes de cobrar de novo.",
+                )
+            }
+        }
+
         pendingAttemptStore.save(
             PendingCieloAttempt(
                 attemptId = request.attemptId,
                 tabId = request.tabId,
                 amountCents = request.amount.cents,
                 startedAtEpochMs = System.currentTimeMillis(),
+                method = request.method.name,
             ),
         )
 
@@ -100,9 +125,18 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
+        // Exigência do manual da Cielo: enquanto o app dela está em primeiro
+        // plano cobrando, o app parceiro precisa de um serviço em primeiro
+        // plano para não ser encerrado pelo Android no meio da cobrança —
+        // que é justamente o cenário em que um pagamento aprovado se perde.
+        // Iniciado ANTES do Intent, para já estar de pé quando perdermos o
+        // primeiro plano.
+        CieloPaymentForegroundService.start(context)
+
         try {
             context.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
+            CieloPaymentForegroundService.stop(context)
             pendingAttemptStore.clear()
             return PaymentResult.Failed(request.attemptId, "Aplicativo da Cielo não encontrado neste terminal.")
         }
@@ -114,6 +148,12 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
         val result = withTimeoutOrNull(PAYMENT_CALLBACK_TIMEOUT_MS) {
             resultBridge.results.first { it.attemptId == request.attemptId }
         } ?: PaymentResult.Unknown(request.attemptId)
+
+        // Sempre parar: no caminho normal a Activity de callback já parou (ela
+        // também precisa fazê-lo, para o caso de o processo ter sido recriado
+        // e não existir mais nenhum startPayment suspenso aqui), e no timeout
+        // esta é a única chance de não deixar a notificação viva para sempre.
+        CieloPaymentForegroundService.stop(context)
 
         if (result !is PaymentResult.Unknown) {
             pendingAttemptStore.clear()
@@ -132,6 +172,22 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
      * manualmente ou tenta de novo.
      */
     suspend fun recoverPendingAttempt(): PendingCieloAttempt? = pendingAttemptStore.current()
+
+    /**
+     * Cobrança APROVADA pela Cielo cujo registro no Nokta ainda não foi
+     * concluído — tipicamente o callback chegou com o processo do app já
+     * morto (ver [ApprovedCieloResult]). Diferente de
+     * [recoverPendingAttempt], aqui o desfecho é conhecido e favorável: o
+     * dinheiro saiu do cliente, só falta gravar o pagamento, o que é feito
+     * com a MESMA `idempotencyKey` — retomar nunca cobra de novo.
+     */
+    suspend fun recoverApprovedResult(): ApprovedCieloResult? = pendingAttemptStore.approvedResult()
+
+    /** Só depois do pagamento estar de fato registrado no Nokta. */
+    suspend fun clearApprovedResult() {
+        pendingAttemptStore.clearApprovedResult()
+        pendingAttemptStore.clear()
+    }
 
     suspend fun discardPendingAttempt() = pendingAttemptStore.clear()
 
@@ -153,6 +209,16 @@ class CieloDeepLinkPaymentProvider @Inject constructor(
         )
     }
 
+    /**
+     * A NOKTA decide a operação; a Cielo executa. O `paymentCode` é o único
+     * campo que carrega essa decisão — nunca deixar a Cielo escolher.
+     *
+     * CREDITO_PARCELADO_LOJA só é usado com `installments > 1`. Hoje nenhuma
+     * tela do app permite escolher parcelas (ver `setInstallments`, sem
+     * chamador), então na prática todo crédito sai como CREDITO_AVISTA — o
+     * caminho parcelado fica pronto e correto, mas NÃO deve ser declarado
+     * como suportado enquanto não houver seleção de parcelas na interface.
+     */
     private fun paymentCodeFor(method: PosPaymentMethod, installments: Int): CieloPaymentCode = when (method) {
         PosPaymentMethod.DEBIT_CARD -> CieloPaymentCode.DEBITO_AVISTA
         PosPaymentMethod.CREDIT_CARD -> if (installments > 1) CieloPaymentCode.CREDITO_PARCELADO_LOJA else CieloPaymentCode.CREDITO_AVISTA

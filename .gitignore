@@ -13,3 +13,12 @@ app/build/
 
 # Gradle home local usado para contornar o acento no caminho do usuário
 /.gradle-home/
+
+# Assinatura de release — NUNCA versionar. A chave de assinatura é o que
+# prova que o APK é da Nokta; vazá-la permite a terceiros publicar um app
+# que o Android aceita como atualização legítima deste. Os caminhos/senhas
+# ficam em keystore.properties (local) ou em variáveis de ambiente no CI —
+# ver signingConfigs em app/build.gradle.kts.
+keystore.properties
+*.jks
+*.keystore

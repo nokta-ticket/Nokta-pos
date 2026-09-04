@@ -306,8 +306,13 @@ class SyncEngine @Inject constructor(
                 remainingCents = response.remainingCents, syncState = SyncState.SYNCED, lastSyncedAtEpochMs = System.currentTimeMillis(),
             ),
         )
-        tabDao.deleteItemsForTab(tabLocalId)
-        tabDao.deletePaymentsForTab(tabLocalId)
+        // Só o que o servidor já conhece — itens/pagamentos ainda na fila do
+        // Outbox (serverId == null) NUNCA voltam na resposta e seriam
+        // destruídos por um delete total. No caso do pagamento isso reabria o
+        // saldo já cobrado e permitia cobrança duplicada; ver
+        // TabDao.deleteSyncedPaymentsForTab.
+        tabDao.deleteSyncedItemsForTab(tabLocalId)
+        tabDao.deleteSyncedPaymentsForTab(tabLocalId)
         response.orders.forEach { order ->
             val orderLocalId = java.util.UUID.randomUUID().toString()
             tabDao.upsertOrder(com.nokta.pos.data.local.entity.TabOrderEntity(localId = orderLocalId, serverId = order.id, tabLocalId = tabLocalId, status = order.status, syncState = SyncState.SYNCED, createdAtEpochMs = System.currentTimeMillis()))

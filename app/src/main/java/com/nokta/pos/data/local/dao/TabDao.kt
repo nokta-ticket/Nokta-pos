@@ -34,12 +34,21 @@ interface TabDao {
      * itens temporariamente vazios (entre o delete e o reinsert) — a UI via
      * a contagem de itens cair e subir de novo sem nenhum item ter mudado de
      * verdade, disparando falsos avisos de "item adicionado".
+     *
+     * O snapshot NUNCA apaga o que ainda não chegou ao servidor (ver
+     * [deleteSyncedItemsForTab]/[deleteSyncedPaymentsForTab]): um item ou um
+     * pagamento gravado localmente e ainda na fila do Outbox tem
+     * `serverId == null` e, por definição, não volta na resposta do servidor
+     * — apagá-lo aqui destruía dinheiro/consumo real. No caso do pagamento
+     * isso reabria o saldo já cobrado (`Tab.remainingWithPending` voltava a
+     * contar o valor como disponível) e permitia cobrar o MESMO valor duas
+     * vezes no mesmo terminal.
      */
     @Transaction
     suspend fun writeTabSnapshot(tab: TabEntity, orders: List<TabOrderEntity>, items: List<TabItemEntity>, payments: List<TabPaymentEntity>) {
         upsertTab(tab)
-        deleteItemsForTab(tab.localId)
-        deletePaymentsForTab(tab.localId)
+        deleteSyncedItemsForTab(tab.localId)
+        deleteSyncedPaymentsForTab(tab.localId)
         orders.forEach { upsertOrder(it) }
         upsertItems(items)
         upsertPayments(payments)
@@ -144,6 +153,19 @@ interface TabDao {
     @Query("DELETE FROM tab_item WHERE tabLocalId = :tabLocalId")
     suspend fun deleteItemsForTab(tabLocalId: String)
 
+    /**
+     * Apaga só os itens que o servidor JÁ conhece (`serverId IS NOT NULL`),
+     * para o snapshot poder regravá-los com o estado oficial sem destruir
+     * consumo lançado offline que ainda está na fila do Outbox.
+     *
+     * Nunca trocar por [deleteItemsForTab] aqui: um item pendente
+     * (`serverId == null`) não volta na resposta do servidor, então seria
+     * apagado sem nunca ter sido enviado — o operador veria o consumo
+     * desaparecer da comanda e ninguém cobraria por ele.
+     */
+    @Query("DELETE FROM tab_item WHERE tabLocalId = :tabLocalId AND serverId IS NOT NULL")
+    suspend fun deleteSyncedItemsForTab(tabLocalId: String)
+
     /** Remove só este item — nunca use [deleteItemsForTab] para isto, que apaga a comanda inteira. */
     @Query("DELETE FROM tab_item WHERE localId = :localId")
     suspend fun deleteItemByLocalId(localId: String)
@@ -242,6 +264,26 @@ interface TabDao {
 
     @Query("DELETE FROM tab_payment WHERE tabLocalId = :tabLocalId")
     suspend fun deletePaymentsForTab(tabLocalId: String)
+
+    /**
+     * Apaga só os pagamentos que o servidor JÁ conhece, preservando os que
+     * ainda estão na fila do Outbox (`serverId IS NULL`) — dinheiro real já
+     * recebido do cliente, que o servidor ainda não viu.
+     *
+     * Este é o ponto que causava cobrança duplicada: com o delete total, um
+     * pagamento pendente sumia do Room ao sincronizar QUALQUER outra operação
+     * da mesma comanda; `Tab.pendingPaymentsTotal` voltava a zero,
+     * `remainingWithPending` reabria o saldo já cobrado e o operador podia
+     * cobrar o mesmo valor de novo. Pior: se aquele pagamento fosse rejeitado
+     * depois, `markPaymentRejected` não achava mais a linha e o dinheiro
+     * recebido sumia da tela sem nenhum rastro.
+     *
+     * REJECTED também é preservado de propósito: é o registro de que a
+     * cobrança foi feita e o servidor recusou — quem decide o que fazer com
+     * esse dinheiro é o operador, nunca um delete silencioso.
+     */
+    @Query("DELETE FROM tab_payment WHERE tabLocalId = :tabLocalId AND serverId IS NOT NULL")
+    suspend fun deleteSyncedPaymentsForTab(tabLocalId: String)
 
     @Query("SELECT * FROM tab_payment WHERE tabLocalId = :tabLocalId")
     suspend fun getPaymentsForTab(tabLocalId: String): List<TabPaymentEntity>

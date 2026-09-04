@@ -112,6 +112,14 @@ data class HomeUiState(
      * resolve a divergência.
      */
     val paymentReconciliationMessage: String? = null,
+    /**
+     * Um pagamento aprovado na Cielo que tinha ficado órfão (processo morto
+     * entre o callback e o registro) foi recuperado e gravado agora — ver
+     * [HomeViewModel.recoverApprovedPaymentIfAny]. Informativo: o operador
+     * precisa saber que aquela cobrança "perdida" entrou no sistema, e que o
+     * cliente não foi cobrado duas vezes.
+     */
+    val recoveredPaymentMessage: String? = null,
 ) {
     /** Existe algo para o sino badge mostrar. */
     val hasCashWarning: Boolean get() = isCashOpen == false
@@ -158,8 +166,18 @@ class HomeViewModel @Inject constructor(
         // sem resultado conhecido, bloqueia a operação normal até o gerente
         // resolver (confirmar manualmente com o extrato do terminal e
         // descartar, ou tentar de novo).
+        //
+        // ANTES disso, o caso feliz: o callback CHEGOU (a cobrança foi
+        // aprovada) mas o processo do app já tinha sido morto, então ninguém
+        // registrou o pagamento. O resultado ficou gravado em disco pela
+        // Activity de callback — aqui ele é registrado no Nokta com a MESMA
+        // idempotencyKey, sem nenhuma cobrança nova. Só se isso falhar (ou
+        // não houver aprovação salva) é que caímos no bloqueio manual.
         viewModelScope.launch {
-            _state.value = _state.value.copy(pendingPaymentAttempt = cieloProvider.recoverPendingAttempt())
+            val recovered = runCatching { recoverApprovedPaymentIfAny() }.getOrDefault(false)
+            if (!recovered) {
+                _state.value = _state.value.copy(pendingPaymentAttempt = cieloProvider.recoverPendingAttempt())
+            }
         }
 
         // Contador de operações pendentes fica sempre visível — o operador
@@ -215,6 +233,51 @@ class HomeViewModel @Inject constructor(
         loadCashStatus()
         pollCashStatus()
         warmUpMenuCache()
+    }
+
+    /**
+     * Cobrança aprovada pela Cielo cujo registro no Nokta nunca aconteceu
+     * porque o processo do app foi morto entre o callback e a gravação.
+     *
+     * Este é o cenário mais perigoso da integração: o dinheiro JÁ saiu do
+     * cliente. Retomar aqui usa a mesma `idempotencyKey` da tentativa
+     * original (`attemptId`), então o backend reconhece como o mesmo
+     * pagamento — nunca existe segunda cobrança, e um retry depois de já ter
+     * registrado devolve o pagamento existente em vez de duplicar.
+     *
+     * Só limpa o resultado do disco DEPOIS do registro confirmado: se falhar
+     * (sem rede, servidor fora), a aprovação continua guardada e é tentada de
+     * novo na próxima abertura da Home — nunca se perde.
+     *
+     * @return true se havia uma aprovação órfã e ela foi registrada agora.
+     */
+    private suspend fun recoverApprovedPaymentIfAny(): Boolean {
+        val approved = cieloProvider.recoverApprovedResult() ?: return false
+        val organizationId = authRepository.currentOrganizationId() ?: return false
+        val tabLocalId = tabRepository.localIdForTabId(organizationId, approved.tabId) ?: return false
+
+        return runCatching {
+            tabRepository.registerPayment(
+                organizationId = organizationId,
+                tabLocalId = tabLocalId,
+                method = approved.method,
+                amount = com.nokta.pos.common.Money(approved.amountCents),
+                idempotencyKey = approved.attemptId,
+                receivedCents = null,
+                externalReference = approved.providerTransactionId,
+            )
+        }.onSuccess {
+            cieloProvider.clearApprovedResult()
+            _state.value = _state.value.copy(
+                syncRejectionMessage = null,
+                recoveredPaymentMessage = "Um pagamento de ${com.nokta.pos.common.Money(approved.amountCents).formatBRL()} " +
+                    "aprovado na maquininha foi recuperado e registrado. O cliente não foi cobrado de novo.",
+            )
+        }.isSuccess
+    }
+
+    fun dismissRecoveredPaymentMessage() {
+        _state.value = _state.value.copy(recoveredPaymentMessage = null)
     }
 
     /**

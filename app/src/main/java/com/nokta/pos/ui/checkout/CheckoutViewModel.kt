@@ -154,7 +154,7 @@ data class PendingQuantityAdjustment(val item: TabItem, val willRemoveCompletely
  */
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val tabRepository: TabRepository,
     private val authRepository: AuthRepository,
     private val paymentProvider: PaymentProvider,
@@ -164,6 +164,37 @@ class CheckoutViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(CheckoutUiState())
     val state: StateFlow<CheckoutUiState> = _state
+
+    /**
+     * Chave de idempotência da cobrança ATUAL — atravessa
+     * `PaymentRequest.attemptId` (referência enviada à Cielo) e
+     * `VenuePayment.idempotencyKey` (registro no Nokta), sempre a mesma.
+     *
+     * Guardada em [SavedStateHandle] porque precisa sobreviver à recriação do
+     * PROCESSO, não só à rotação de tela: sem isso, um process death no meio
+     * da cobrança fazia a tentativa seguinte nascer com um UUID novo, que o
+     * backend aceita como pagamento DISTINTO — cobrando o cliente duas vezes
+     * na adquirente pela mesma parte da conta. (O `BalcaoViewModel` já fazia
+     * assim; o checkout de comanda/mesa usava o default aleatório de
+     * `PaymentRequest`, que é o bug.)
+     *
+     * Só é renovada em [advanceToNextCharge], depois de uma cobrança
+     * CONFIRMADA — nunca entre tentativas da mesma cobrança.
+     */
+    private var paymentIdempotencyKey: String
+        get() = savedStateHandle.get<String>(KEY_PAYMENT_IDEMPOTENCY)
+            ?: UUID.randomUUID().toString().also { savedStateHandle[KEY_PAYMENT_IDEMPOTENCY] = it }
+        set(value) { savedStateHandle[KEY_PAYMENT_IDEMPOTENCY] = value }
+
+    /**
+     * Depois de um pagamento registrado com sucesso, a PRÓXIMA cobrança
+     * (segunda pessoa da divisão, saldo restante) precisa de uma chave nova —
+     * reusar a anterior faria o backend devolver o pagamento já existente
+     * (idempotência) e o segundo valor nunca seria registrado.
+     */
+    private fun advanceToNextCharge() {
+        paymentIdempotencyKey = UUID.randomUUID().toString()
+    }
 
     init {
         observeTab()
@@ -324,11 +355,16 @@ class CheckoutViewModel @Inject constructor(
                 // já estava aberta (o backend recusa o lançamento, nunca o
                 // pagamento). O pagamento é conciliado no caixa em que o
                 // atendimento nasceu, mesmo que esse caixa já tenha fechado.
+                // `paymentIdempotencyKey` (persistido), nunca um UUID novo a
+                // cada toque: um duplo clique ou um retry após process death
+                // registraria o MESMO dinheiro duas vezes com chaves
+                // diferentes, e o backend aceitaria as duas como pagamentos
+                // distintos.
                 PaymentUiMethod.CASH -> register(
                     organizationId, tab, "CASH", amount,
                     receivedCents = _state.value.receivedCents,
                     externalReference = null,
-                    attemptId = UUID.randomUUID().toString(),
+                    attemptId = paymentIdempotencyKey,
                 )
                 // PIX passa pelo mesmo deep link da Cielo Smart que
                 // débito/crédito — é o PIX cobrado dentro do terminal (QR
@@ -349,6 +385,12 @@ class CheckoutViewModel @Inject constructor(
 
         val result = paymentProvider.startPayment(
             PaymentRequest(
+                // Mesma chave da cobrança atual (persistida em
+                // SavedStateHandle): é ela que vira `reference` na Cielo e
+                // `idempotencyKey` no Nokta. Sem passá-la aqui, o default do
+                // PaymentRequest gerava um UUID novo a cada tentativa e um
+                // retry após process death cobrava o cliente de novo.
+                attemptId = paymentIdempotencyKey,
                 tabId = tab.id,
                 amount = amount,
                 method = method,
@@ -404,6 +446,14 @@ class CheckoutViewModel @Inject constructor(
                 externalReference = externalReference,
             )
         }.onSuccess { updated ->
+            // Cobrança concluída: a PRÓXIMA (2ª pessoa da divisão, saldo
+            // restante) precisa de chave nova, senão a idempotência do
+            // backend devolveria este mesmo pagamento e o segundo valor
+            // nunca seria registrado.
+            advanceToNextCharge()
+            // Aprovação Cielo que estava guardada em disco já virou pagamento
+            // registrado — só agora pode ser descartada.
+            (paymentProvider as? com.nokta.pos.payment.cielo.CieloDeepLinkPaymentProvider)?.clearApprovedResult()
             // `isFullyPaid` usa SÓ o saldo oficial do servidor (`remaining`),
             // nunca `remainingWithPending` — de propósito: fechar a comanda
             // (`closeTab`) exige `serverId` e é sempre síncrono contra o
@@ -476,3 +526,5 @@ class CheckoutViewModel @Inject constructor(
         // e a comanda pode ser encerrada depois, na tela da comanda.
     }
 }
+
+private const val KEY_PAYMENT_IDEMPOTENCY = "checkout_payment_idempotency_key"

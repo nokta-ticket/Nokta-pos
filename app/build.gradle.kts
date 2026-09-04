@@ -1,3 +1,8 @@
+// Import explícito: dentro do bloco `android { }` o identificador `java`
+// resolve para a extensão do AGP, não para o pacote java.* — sem isto,
+// `java.util.Properties` abaixo não compila.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,15 +20,55 @@ android {
         minSdk = 29 // Cielo Smart exige Android 10+ (seção 5 do manual de certificação)
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0-mvp"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    /**
+     * Assinatura do release — exigida para publicar/homologar (um APK
+     * não assinado, ou assinado com a chave de debug, é recusado).
+     *
+     * A keystore NUNCA vai versionada: os valores vêm de
+     * `keystore.properties` na raiz do projeto (fora do git, ver
+     * .gitignore) ou de variáveis de ambiente no CI. Sem esses valores, a
+     * config simplesmente não é criada e o build de release falha de forma
+     * explícita em vez de gerar um APK inutilizável em silêncio.
+     */
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val keystoreProps = Properties().apply {
+        if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+    }
+    val releaseStorePath = keystoreProps.getProperty("storeFile") ?: System.getenv("NOKTA_KEYSTORE_FILE")
+    val releaseStorePassword = keystoreProps.getProperty("storePassword") ?: System.getenv("NOKTA_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = keystoreProps.getProperty("keyAlias") ?: System.getenv("NOKTA_KEY_ALIAS")
+    val releaseKeyPassword = keystoreProps.getProperty("keyPassword") ?: System.getenv("NOKTA_KEY_PASSWORD")
+    val hasReleaseSigning = releaseStorePath != null && releaseStorePassword != null &&
+        releaseKeyAlias != null && releaseKeyPassword != null
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                // v1 continua ligado por causa do minSdk 29 (Android 10):
+                // v2/v3 sozinhos bastam a partir do 24, mas manter v1 não
+                // custa nada e evita surpresa em terminal antigo.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

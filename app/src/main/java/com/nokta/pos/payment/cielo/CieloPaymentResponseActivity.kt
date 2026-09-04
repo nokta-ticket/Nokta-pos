@@ -40,6 +40,14 @@ class CieloPaymentResponseActivity : ComponentActivity() {
         val uri = intent?.data ?: return
         if (intent.action != Intent.ACTION_VIEW) return
 
+        // O app da Cielo devolveu o resultado: o serviço em primeiro plano
+        // que segurava o processo vivo durante a cobrança já cumpriu o papel
+        // (ver CieloPaymentForegroundService). Parado aqui, e não só no
+        // provider, porque o callback pode chegar com o processo recriado —
+        // caso em que não existe mais nenhum `startPayment` suspenso para
+        // fazer essa limpeza.
+        CieloPaymentForegroundService.stop(this)
+
         lifecycleScope.launch {
             val attempt = pendingAttemptStore.current()
             if (attempt == null) {
@@ -50,6 +58,25 @@ class CieloPaymentResponseActivity : ComponentActivity() {
             }
 
             val result = decodeResult(uri, attempt.attemptId)
+
+            // Aprovação é gravada em disco ANTES de qualquer tentativa de
+            // entregá-la: se o processo morrer no instante seguinte, a prova
+            // de que o cliente foi cobrado sobrevive e o registro é retomado
+            // ao reabrir o app (ver HomeViewModel/ApprovedCieloResult) — em
+            // vez de virar `Unknown` e o dinheiro sumir do sistema.
+            if (result is PaymentResult.Approved) {
+                pendingAttemptStore.saveApprovedResult(
+                    ApprovedCieloResult(
+                        attemptId = result.attemptId,
+                        tabId = attempt.tabId,
+                        amountCents = result.amount.cents,
+                        providerTransactionId = result.providerTransactionId,
+                        method = attempt.method,
+                        approvedAtEpochMs = System.currentTimeMillis(),
+                    ),
+                )
+            }
+
             resultBridge.emit(result)
         }
     }

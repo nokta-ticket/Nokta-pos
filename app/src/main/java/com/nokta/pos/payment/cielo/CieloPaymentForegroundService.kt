@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -15,9 +16,17 @@ import com.nokta.pos.R
  * mantém o processo do app parceiro vivo enquanto o app Cielo está em
  * primeiro plano processando o pagamento — evita o Android encerrar o
  * processo Nokta POS por estar em segundo plano durante a cobrança.
+ *
  * Iniciado logo antes de disparar o Intent de pagamento
- * (CieloDeepLinkPaymentProvider), parado assim que o resultado chega
- * (CieloPaymentResponseActivity).
+ * ([CieloDeepLinkPaymentProvider.startPayment]) e parado assim que o
+ * resultado chega ([CieloPaymentResponseActivity]) — ou quando a tentativa
+ * termina sem callback nenhum (timeout/app da Cielo ausente), para nunca
+ * deixar uma notificação viva sem cobrança acontecendo.
+ *
+ * Usar sempre [start]/[stop], nunca `startService` solto: `startForeground`
+ * precisa acontecer dentro da janela que o Android concede após o start, e
+ * `START_NOT_STICKY` garante que o serviço não é ressuscitado sozinho depois
+ * de o processo morrer (o que reviveria a notificação sem pagamento algum).
  */
 class CieloPaymentForegroundService : Service() {
 
@@ -51,5 +60,27 @@ class CieloPaymentForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "cielo_payment_channel"
         const val NOTIFICATION_ID = 1001
+
+        /**
+         * Falha ao iniciar nunca pode derrubar a cobrança: o pagamento em si
+         * funciona sem o serviço (ele só reduz a chance de o processo ser
+         * morto), então um erro de plataforma aqui é engolido de propósito —
+         * o pior caso volta a ser exatamente o comportamento anterior a esta
+         * proteção existir.
+         */
+        fun start(context: Context) {
+            runCatching {
+                val intent = Intent(context, CieloPaymentForegroundService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+        }
+
+        fun stop(context: Context) {
+            runCatching { context.stopService(Intent(context, CieloPaymentForegroundService::class.java)) }
+        }
     }
 }
