@@ -37,7 +37,12 @@ android {
      */
     val keystorePropsFile = rootProject.file("keystore.properties")
     val keystoreProps = Properties().apply {
-        if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+        // reader(UTF-8), NUNCA inputStream(): Properties.load(InputStream) lê
+        // como ISO-8859-1 por especificação, e o caminho da keystore deste
+        // projeto passa por "C:\Users\Usuário\..." — o "á" virava "Ã¡" e o
+        // Gradle falhava com "Keystore file not found" apontando um caminho
+        // corrompido, sem nenhuma pista de que a causa era encoding.
+        if (keystorePropsFile.exists()) keystorePropsFile.reader(Charsets.UTF_8).use { load(it) }
     }
     val releaseStorePath = keystoreProps.getProperty("storeFile") ?: System.getenv("NOKTA_KEYSTORE_FILE")
     val releaseStorePassword = keystoreProps.getProperty("storePassword") ?: System.getenv("NOKTA_KEYSTORE_PASSWORD")
@@ -53,10 +58,20 @@ android {
                 storePassword = releaseStorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
-                // v1 continua ligado por causa do minSdk 29 (Android 10):
-                // v2/v3 sozinhos bastam a partir do 24, mas manter v1 não
-                // custa nada e evita surpresa em terminal antigo.
-                enableV1Signing = true
+                // v1 (JAR signing) fica DESLIGADA de propósito: só é
+                // necessária abaixo do Android 7, e o minSdk aqui é 29
+                // (exigência da Cielo Smart). O AGP a ignora quando
+                // minSdk >= 24 mesmo se pedida — deixá-la `true` dava a
+                // falsa impressão de que o APK era v1-assinado, quando o
+                // `apksigner verify` mostra "v1: false".
+                //
+                // Só v2, deliberadamente. Ligar v3 junto FEZ o AGP publicar
+                // apenas o bloco v3 (verificado com `apksigner verify`:
+                // "v2: false, v3: true"), o que reduziria a compatibilidade
+                // para Android 9+ sem nenhum ganho aqui — a rotação de
+                // chave que a v3 habilita não está em uso. v2 é o esquema
+                // que todo terminal com Android 10+ valida.
+                enableV1Signing = false
                 enableV2Signing = true
             }
         }
